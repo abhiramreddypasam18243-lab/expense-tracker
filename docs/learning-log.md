@@ -137,3 +137,25 @@
 1. Why does `cli.main` map argparse's exit code 2 (bad arguments) to our exit code 1?
 2. Why must `export` write `-1234.50` rather than `-₹1,234.50`? What would happen on re-import?
 3. A command fails with an unexpected `KeyError('SECRET SHOP')`. What does the user see, and why don't we print the message?
+
+## Step 7 — Streamlit UI (AC-35 to AC-37) — 2026-10-12
+
+**What was built**
+- `app.py`: page config, CSS, logo, one SQLite connection per script run, `st.navigation` with 5 pages.
+- `ui/dashboard.py` (KPIs with month-over-month deltas, category donut + legend, 12-month trend, colour-coded budget bars, top anomalies), `ui/transactions.py` (filters, search, editable Category column, CSV export), `ui/import_data.py` (upload form, import report, history with confirm-to-undo), `ui/insights_page.py` (explained anomalies, top merchants), `ui/settings.py` (categories, rules editor, budgets).
+- `ui/common.py`, `ui/charts.py` (Altair), `ui/style.py` (small offline CSS), `.streamlit/config.toml` (light + dark themes), `ui/assets/*.svg`.
+
+**Why it is designed this way**
+- *UI is a thin layer*: pages only call `expenses.*` functions and format results. AC-36 enforces it: no `streamlit` import in `expenses/`, no SQL keywords in `ui/`.
+- *One connection per run*: Streamlit re-runs the whole script on every click, possibly on different threads; a SQLite connection is cheap to open and must not be shared across threads, so `app.py` opens one, stores it in `st.session_state`, and closes it in `finally`.
+- *Editor key changes after every save* (`txn-…-{version}`): `st.data_editor` remembers edits by *row position*. If filters changed, an old "row 3 → Shopping" edit could land on a different transaction. A fresh key throws old edits away.
+- *Money is never typed as a float*: budget limits are entered as text and parsed with `parse_amount` (I1); charts get whole rupees (`paise // 100`) only to size the bars, while every label is `format_inr` text.
+- *Escaping*: user data (descriptions, merchants, category names) goes through `html.escape` before being placed in HTML, so a description like `<script>` is shown, not run.
+
+**One thing that could go wrong**
+- Streamlit's `st.html("")` with an empty string raises an error — the dashboard crashed when no budgets existed. AC-35 (render every page with seeded data) caught it before commit. UI tests that render pages with *different data states* are what catch this class of bug.
+
+**Quiz questions**
+1. Why does the Transactions page change the `st.data_editor` key after saving a category change? What bug would happen without it?
+2. Where does the number on a dashboard bar come from, and why is it OK to use `paise // 100` there but not in `insights.py`?
+3. What does AC-36 check, and how does that protect the "thin UI" rule?

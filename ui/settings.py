@@ -1,0 +1,167 @@
+"""Settings: categories, keyword rules and monthly budgets."""
+
+import pandas as pd
+import streamlit as st
+
+from expenses import categorize, insights
+from expenses.money import MoneyParseError, format_inr, parse_amount
+from ui.common import esc, get_conn, page_header
+
+KINDS = ["expense", "income", "transfer"]
+
+conn = get_conn()
+page_header("Settings", "Tune how transactions are categorised and set monthly budgets.")
+
+categories = categorize.list_categories(conn)
+by_name = {c["name"]: c for c in categories}
+by_id = {c["id"]: c for c in categories}
+
+tab_categories, tab_rules, tab_budgets = st.tabs(
+    [":material/category: Categories", ":material/rule: Rules", ":material/savings: Budgets"]
+)
+
+# --- categories ----------------------------------------------------------------------------------------
+with tab_categories:
+    list_col, form_col = st.columns([3, 2])
+    with list_col, st.container(border=True):
+        for c in categories:
+            name_col, kind_col, action_col = st.columns([3, 1.4, 1], vertical_alignment="center")
+            name_col.html(
+                f'<div class="legend-row" style="border:none"><span class="dot" style="background:{esc(c["color"])}">'
+                f'</span><span class="name">{esc(c["name"])}</span></div>'
+            )
+            kind_col.caption(c["kind"].title())
+            if c["name"] != categorize.UNCATEGORISED:
+                with action_col.popover("", icon=":material/delete:", help=f"Delete {c['name']}"):
+                    st.markdown(
+                        f"Delete **{c['name']}**? Its transactions move to *Uncategorised* and its rules "
+                        "and budget are removed."
+                    )
+                    if st.button("Delete category", key=f"del-cat-{c['id']}", type="primary"):
+                        categorize.delete_category(conn, c["id"])
+                        st.toast(f"Deleted {c['name']}", icon=":material/delete:")
+                        st.rerun()
+    with form_col, st.container(border=True):
+        st.markdown("**Add a category**")
+        with st.form("add_category", clear_on_submit=True, border=False):
+            name = st.text_input("Name", placeholder="e.g. Pets")
+            kind = st.selectbox("Type", KINDS, format_func=str.title)
+            color = st.color_picker("Colour", "#64748B")
+            if st.form_submit_button("Add category", type="primary", icon=":material/add:"):
+                if not name.strip():
+                    st.error("Enter a name.")
+                elif name.strip() in by_name:
+                    st.error("That category already exists.")
+                else:
+                    categorize.add_category(conn, name, kind, color.upper())
+                    st.toast(f"Added {name.strip()}", icon=":material/check:")
+                    st.rerun()
+
+# --- rules -------------------------------------------------------------------------------------------------
+with tab_rules:
+    st.caption(
+        "A rule matches when its text appears anywhere in a description (case-insensitive). "
+        "Lower priority numbers run first; the first match wins. Your manual choices are never overwritten."
+    )
+    rules = categorize.list_rules(conn)
+    rules_df = pd.DataFrame(
+        {
+            "id": [r["id"] for r in rules],
+            "Pattern": [r["pattern"] for r in rules],
+            "Category": [by_id[r["category_id"]]["name"] for r in rules],
+            "Priority": [r["priority"] for r in rules],
+        }
+    )
+    version = st.session_state.setdefault("rules_version", 0)
+    edited = st.data_editor(
+        rules_df,
+        key=f"rules-{version}",
+        num_rows="dynamic",
+        hide_index=True,
+        width="stretch",
+        height=420,
+        column_order=["Priority", "Pattern", "Category"],
+        column_config={
+            "Priority": st.column_config.NumberColumn(
+                min_value=0, max_value=9999, step=1, width="small", required=True, default=100
+            ),
+            "Pattern": st.column_config.TextColumn(required=True, width="large"),
+            "Category": st.column_config.SelectboxColumn(
+                options=list(by_name), required=True, width="medium"
+            ),
+        },
+    )
+    save_col, rerun_col, _ = st.columns([1, 1.4, 2])
+    if save_col.button("Save rules", type="primary", icon=":material/save:", width="stretch"):
+        original = {int(r["id"]): r for r in rules}
+        kept_ids = set()
+        problems = 0
+        for row in edited.itertuples(index=False):
+            if (
+                not isinstance(row.Pattern, str)
+                or not row.Pattern.strip()
+                or row.Category not in by_name
+                or pd.isna(row.Priority)
+            ):
+                problems += 1
+                continue
+            values = (row.Pattern, by_name[row.Category]["id"], int(row.Priority))
+            if pd.isna(row.id):
+                categorize.add_rule(conn, *values)
+                continue
+            rule_id = int(row.id)
+            kept_ids.add(rule_id)
+            old = original[rule_id]
+            if (old["pattern"], old["category_id"], old["priority"]) != values:
+                categorize.update_rule(conn, rule_id, *values)
+        for rule_id in set(original) - kept_ids:
+            categorize.delete_rule(conn, rule_id)
+        st.session_state["rules_version"] = version + 1
+        if problems:
+            st.session_state["rules_warning"] = f"{problems} incomplete row(s) were skipped."
+        st.toast("Rules saved", icon=":material/check:")
+        st.rerun()
+    if rerun_col.button("Re-run rules on all transactions", icon=":material/autorenew:", width="stretch"):
+        changed = categorize.recategorize(conn)
+        st.toast(f"Recategorised {changed} transaction(s)", icon=":material/autorenew:")
+    if warning := st.session_state.pop("rules_warning", None):
+        st.warning(warning, icon=":material/warning:")
+
+# --- budgets ------------------------------------------------------------------------------------------------
+with tab_budgets:
+    list_col, form_col = st.columns([3, 2])
+    budgets = {b["category_id"]: b for b in insights.list_budgets(conn)}
+    with list_col, st.container(border=True):
+        if not budgets:
+            st.caption("No budgets yet. Add one on the right; progress shows on the Dashboard.")
+        for b in budgets.values():
+            name_col, amount_col, action_col = st.columns([3, 2, 1], vertical_alignment="center")
+            name_col.html(
+                f'<div class="legend-row" style="border:none"><span class="dot" style="background:{esc(b["color"])}">'
+                f'</span><span class="name">{esc(b["name"])}</span></div>'
+            )
+            amount_col.markdown(f"**{format_inr(b['monthly_limit_minor'])}** / month")
+            if action_col.button(
+                "",
+                icon=":material/close:",
+                key=f"del-budget-{b['category_id']}",
+                help=f"Remove the {b['name']} budget",
+            ):
+                insights.remove_budget(conn, b["category_id"])
+                st.rerun()
+    with form_col, st.container(border=True):
+        st.markdown("**Set a monthly budget**")
+        expense_names = [c["name"] for c in categories if c["kind"] == "expense"]
+        with st.form("set_budget", clear_on_submit=True, border=False):
+            category = st.selectbox("Category", expense_names)
+            amount = st.text_input("Monthly limit (₹)", placeholder="e.g. 5,000")
+            if st.form_submit_button("Save budget", type="primary", icon=":material/save:"):
+                try:
+                    limit = parse_amount(amount)
+                    insights.set_budget(conn, by_name[category]["id"], limit)
+                    st.toast(f"{category}: {format_inr(limit)} per month", icon=":material/check:")
+                    st.rerun()
+                except MoneyParseError:
+                    st.error("Enter an amount like 5,000 or 5000.50")
+                except ValueError as exc:
+                    st.error(str(exc).capitalize())

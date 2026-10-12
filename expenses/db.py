@@ -280,6 +280,12 @@ def list_transactions(
     return conn.execute(sql, params).fetchall()
 
 
+def list_months(conn: sqlite3.Connection) -> list[str]:
+    """Months that have transactions, newest first, as 'YYYY-MM'."""
+    rows = conn.execute("SELECT DISTINCT substr(txn_date, 1, 7) FROM transactions ORDER BY 1 DESC")
+    return [r[0] for r in rows]
+
+
 def list_accounts(conn: sqlite3.Connection) -> list[str]:
     return [r[0] for r in conn.execute("SELECT DISTINCT account FROM transactions ORDER BY account")]
 

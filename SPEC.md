@@ -262,7 +262,8 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 ```
 expense tracker/
   app.py                    # Streamlit entry (navigation only)
-  ui/                       # Streamlit pages + style.py (thin)
+  ui/                       # Streamlit pages (dashboard, transactions, import_data, insights_page,
+                            #   settings) + common.py, charts.py, style.py, assets/ (logo SVGs)
   expenses/                 # core — NO streamlit imports
     money.py                # I1, INR formatting
     dates.py                # I2
@@ -409,6 +410,9 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-12 | **Q3**: refunds are income (Refunds category) and do not reduce category spend | Transparent; avoids fuzzy merchant matching |
 | 2026-10-12 | Added `expenses/exporter.py` and a global `--db` CLI option | Export is shared by the CLI and the UI's export button; `--db` lets tests and demos use a separate database |
 | 2026-10-12 | Export writes the converted INR amount only | AC-34 round trip is in INR; the original currency stays in the database |
+| 2026-10-12 | UI theme defines both light and dark palettes in `.streamlit/config.toml`; the app follows the viewer's system setting | One accent colour per theme keeps the look calm in both |
+| 2026-10-12 | Budget bars are drawn with small HTML/CSS (green / orange / red by status) instead of `st.progress` | `st.progress` can't change colour, so over-budget wasn't visible at a glance |
+| 2026-10-12 | Ruff ignores line length (E501) in `ui/*.py` only | UI files hold HTML/markdown snippets that read worse when split |
 
 ---
 

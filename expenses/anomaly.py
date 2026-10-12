@@ -33,8 +33,9 @@ class Anomaly:
 
     @property
     def times_typical(self) -> Decimal:
-        """How many times the typical spend this was, e.g. 18.7 (display only)."""
-        return (Decimal(-self.amount_minor) / self.median_minor).quantize(Decimal("0.1"))
+        """How many times the typical spend this was, e.g. 18.7 or 420 (display only)."""
+        ratio = (Decimal(-self.amount_minor) / self.median_minor).quantize(Decimal("0.1"))
+        return ratio.quantize(Decimal(1)) if ratio == ratio.to_integral_value() else ratio
 
 
 # ---------------------------------------------------------------------------

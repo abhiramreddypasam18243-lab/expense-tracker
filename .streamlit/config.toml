@@ -3,3 +3,41 @@ gatherUsageStats = false
 
 [server]
 headless = true
+
+[client]
+toolbarMode = "minimal"
+
+# --- Theme (spec 7.2): calm neutrals, one indigo accent, rounded cards ---------------
+[theme]
+baseRadius = "0.75rem"
+buttonRadius = "0.6rem"
+showWidgetBorder = true
+showSidebarBorder = true
+metricValueFontSize = "1.7rem"
+metricValueFontWeight = 700
+
+[theme.light]
+primaryColor = "#4F46E5"
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#EEF2F7"
+textColor = "#0F172A"
+borderColor = "#E2E8F0"
+dataframeHeaderBackgroundColor = "#F1F5F9"
+greenColor = "#16A34A"
+redColor = "#DC2626"
+
+[theme.light.sidebar]
+backgroundColor = "#FFFFFF"
+
+[theme.dark]
+primaryColor = "#818CF8"
+backgroundColor = "#0B1120"
+secondaryBackgroundColor = "#1E293B"
+textColor = "#E2E8F0"
+borderColor = "#1E293B"
+dataframeHeaderBackgroundColor = "#111827"
+greenColor = "#4ADE80"
+redColor = "#F87171"
+
+[theme.dark.sidebar]
+backgroundColor = "#0F172A"

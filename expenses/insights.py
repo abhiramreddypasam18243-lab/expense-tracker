@@ -73,10 +73,9 @@ def month_range(month: str) -> tuple[date, date]:
     return date(year, mon, 1), date(next_year, next_mon, 1)
 
 
-def latest_month(conn: sqlite3.Connection) -> str | None:
-    """Most recent month with data, for sensible UI defaults."""
-    rows = db.transactions_between(conn, date(1900, 1, 1), date(9999, 1, 1))
-    return rows[-1]["txn_date"][:7] if rows else None
+def available_months(conn: sqlite3.Connection) -> list[str]:
+    """Months that have transactions, newest first (for month pickers)."""
+    return db.list_months(conn)
 
 
 # --- 6.2 summary and trend ---------------------------------------------------------------------
@@ -145,6 +144,11 @@ def set_budget(conn: sqlite3.Connection, category_id: int, limit_minor: int) -> 
         raise ValueError("budget must be greater than zero")
     with conn:
         db.upsert_budget(conn, category_id, limit_minor)
+
+
+def list_budgets(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """All budgets with category name and colour (Settings page)."""
+    return db.list_budgets(conn)
 
 
 def remove_budget(conn: sqlite3.Connection, category_id: int) -> None:

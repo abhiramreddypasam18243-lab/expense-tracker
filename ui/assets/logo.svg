@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="40" viewBox="0 0 220 40">
+  <rect x="2" y="6" width="28" height="28" rx="8" fill="#6366F1"/>
+  <path d="M9 15.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z" fill="none" stroke="#fff" stroke-width="2"/>
+  <path d="M9 15.5l10-4.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="20.5" cy="21.5" r="1.6" fill="#fff"/>
+  <text x="40" y="26.5" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#6366F1">Expense Tracker</text>
+</svg>

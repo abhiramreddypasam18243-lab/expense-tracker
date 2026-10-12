@@ -14,3 +14,7 @@ extend-exclude = [".venv"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# UI files hold HTML/markdown snippets that read better unsplit.
+"ui/*.py" = ["E501"]
