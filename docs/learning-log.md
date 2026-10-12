@@ -70,3 +70,24 @@
 1. A statement has three identical ₹20 tea rows on one day. You import it, then import an overlapping statement containing only two of them. How many tea rows are stored, and why?
 2. Why does the fingerprint use `orig_amount_minor` instead of the converted INR `amount_minor`?
 3. What would break if `import_csv` inserted each row in its own transaction instead of wrapping the whole file in `with conn:`?
+
+## Step 4 — Categorisation (AC-23 to AC-26) — 2026-10-12
+
+**What was built**
+- `expenses/categorize.py`: 14 default categories (with chart colours), 38 default keyword rules, `seed_defaults`, `match_category`, `recategorize`, manual `set_category`, and add/edit/delete for categories and rules.
+- Category and rule SQL added to `db.py`; the importer now categorises each row as it is inserted.
+
+**Why it is designed this way**
+- *Substring rules, first match wins, ordered by (priority, id)*: easy to explain and fully predictable. Example: `REFUND AMAZON RETAIL` matches both `REFUND` (priority 10) and `AMAZON` (priority 100) → priority 10 runs first → Refunds, not Shopping.
+- *`category_source` column* (`rule` / `manual` / `default`): "Re-run rules" only touches non-manual rows, so a user's correction is never silently undone.
+- *Seed only when there are no categories*: running it twice does nothing, and a category the user deleted is not resurrected on the next start.
+- *Uncategorised is protected*: it is the fallback for no-match rows and for deleted categories, so it can't be deleted or renamed.
+- *Seeding runs before the import's `with conn:`*: in sqlite3, a nested `with conn:` commits when it exits, which would break the "whole file or nothing" rule.
+
+**One thing that could go wrong**
+- Substring matching has false positives: `RENT` also matches `PARENT` or `CURRENT A/C`, and `METRO` matches `METRO CASH AND CARRY` (a wholesale store). That's why `RENT` has priority 200 (runs last), and users can add more specific rules with lower priority numbers.
+
+**Quiz questions**
+1. Two rules have the same priority and both match a description. Which one wins, and why is it important that the order is deterministic?
+2. A user manually moves a Swiggy order to "Entertainment", then adds a new rule and clicks "Re-run rules". What happens to that order, and which column makes this possible?
+3. What happens to a category's transactions, rules and budget when the category is deleted?

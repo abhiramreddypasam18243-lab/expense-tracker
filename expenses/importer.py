@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
-from expenses import db, fx
+from expenses import categorize, db, fx
 from expenses.dates import DateParseError, parse_date
 from expenses.fingerprint import OccurrenceCounter, fingerprint
 from expenses.money import MoneyParseError, parse_amount, parse_debit_credit
@@ -225,6 +225,9 @@ def import_csv(
     rows = [(reader.line_num, row) for row in reader]
     header_index, cols = find_header([row for _, row in rows])
 
+    categorize.seed_defaults(conn)  # before `with conn:` below — it commits on its own
+    rules = categorize.list_rules(conn)
+    fallback_category = categorize.uncategorised_id(conn)
     rates = _RateLookup(conn, fetch_rate)
     counter = OccurrenceCounter()
     with conn:
@@ -253,6 +256,9 @@ def import_csv(
             occurrence = counter.next(*key)
             parsed["fingerprint"] = fingerprint(*key, occurrence)
             parsed["txn_date"] = parsed["txn_date"].isoformat()
+            parsed["category_id"], parsed["category_source"] = categorize.categorize(
+                parsed["description_norm"], rules, fallback_category
+            )
             if db.insert_transaction(conn, {**parsed, "account": account, "batch_id": batch_id}):
                 report.rows_imported += 1
             else:

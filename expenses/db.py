@@ -119,11 +119,9 @@ def finish_batch(
 def delete_batch(conn: sqlite3.Connection, batch_id: int) -> int:
     """Delete a batch and (via ON DELETE CASCADE) its transactions. Returns rows removed."""
     with conn:
-        count = conn.execute("SELECT COUNT(*) FROM transactions WHERE batch_id = ?", (batch_id,)).fetchone()[
-            0
-        ]
+        row = conn.execute("SELECT COUNT(*) FROM transactions WHERE batch_id = ?", (batch_id,)).fetchone()
         conn.execute("DELETE FROM import_batches WHERE id = ?", (batch_id,))
-    return count
+    return row[0]
 
 
 def list_batches(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -146,6 +144,85 @@ def insert_transaction(conn: sqlite3.Connection, row: dict) -> bool:
         {"category_id": None, "category_source": "default", "created_at": _now(), **row},
     )
     return cur.rowcount == 1
+
+
+def list_non_manual_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Rows that rules may (re)categorise: everything except manual overrides."""
+    return conn.execute(
+        "SELECT id, description_norm, category_id FROM transactions WHERE category_source != 'manual'"
+    ).fetchall()
+
+
+def set_transaction_category(conn: sqlite3.Connection, txn_id: int, category_id: int, source: str) -> None:
+    conn.execute(
+        "UPDATE transactions SET category_id = ?, category_source = ? WHERE id = ?",
+        (category_id, source, txn_id),
+    )
+
+
+# --- categories -----------------------------------------------------------------------------
+
+
+def count_categories(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
+
+
+def list_categories(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM categories ORDER BY name").fetchall()
+
+
+def get_category_id(conn: sqlite3.Connection, name: str) -> int | None:
+    row = conn.execute("SELECT id FROM categories WHERE name = ?", (name,)).fetchone()
+    return row[0] if row else None
+
+
+def insert_category(conn: sqlite3.Connection, name: str, kind: str, color: str) -> int:
+    cur = conn.execute("INSERT INTO categories (name, kind, color) VALUES (?, ?, ?)", (name, kind, color))
+    return cur.lastrowid
+
+
+def update_category(conn: sqlite3.Connection, category_id: int, name: str, kind: str, color: str) -> None:
+    conn.execute(
+        "UPDATE categories SET name = ?, kind = ?, color = ? WHERE id = ?", (name, kind, color, category_id)
+    )
+
+
+def delete_category(conn: sqlite3.Connection, category_id: int, fallback_id: int) -> None:
+    """Move the category's transactions to `fallback_id`, then delete it (rules/budgets cascade)."""
+    conn.execute(
+        "UPDATE transactions SET category_id = ?, category_source = 'default' WHERE category_id = ?",
+        (fallback_id, category_id),
+    )
+    conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+
+
+# --- rules ------------------------------------------------------------------------------------
+
+
+def list_rules(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Rules in matching order: ascending priority, then id."""
+    return conn.execute("SELECT * FROM rules ORDER BY priority, id").fetchall()
+
+
+def insert_rule(conn: sqlite3.Connection, pattern: str, category_id: int, priority: int) -> int:
+    cur = conn.execute(
+        "INSERT INTO rules (pattern, category_id, priority) VALUES (?, ?, ?)",
+        (pattern, category_id, priority),
+    )
+    return cur.lastrowid
+
+
+def update_rule(
+    conn: sqlite3.Connection, rule_id: int, pattern: str, category_id: int, priority: int
+) -> None:
+    conn.execute(
+        "UPDATE rules SET pattern = ?, category_id = ?, priority = ? WHERE id = ?",
+        (pattern, category_id, priority, rule_id),
+    )
+
+
+def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
+    conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
 
 
 # --- exchange-rate cache -----------------------------------------------------------------
