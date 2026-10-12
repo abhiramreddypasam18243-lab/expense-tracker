@@ -91,3 +91,28 @@
 1. Two rules have the same priority and both match a description. Which one wins, and why is it important that the order is deterministic?
 2. A user manually moves a Swiggy order to "Entertainment", then adds a new rule and clicks "Re-run rules". What happens to that order, and which column makes this possible?
 3. What happens to a category's transactions, rules and budget when the category is deleted?
+
+## Step 5 — Insights, budgets, anomalies (AC-27 to AC-32) — 2026-10-12
+
+**What was built**
+- `expenses/insights.py`: `monthly_summary` (income, spend, net, per category, top merchants), `spending_trend` (12 months, zeros filled), budgets (`set_budget`, `budget_status`, `budget_state`).
+- `expenses/anomaly.py`: `median`, `robust_scores` (**[LEARN] 6.1** — written by Claude at the owner's request) and `find_anomalies`.
+- Insight and budget queries added to `db.py`.
+
+**Why it is designed this way**
+- *Median + MAD instead of mean + standard deviation*: one huge value drags the mean and SD toward itself and hides. Swiggy orders ₹100–160 plus one ₹5,000: mean ≈ ₹739, SD ≈ ₹1,720 → ordinary z of the ₹5,000 ≈ 2.5 (not flagged!). Median ₹135, MAD ₹20 → modified z ≈ 164 (clearly flagged).
+- *0.6745*: for normally distributed data MAD ≈ 0.6745 × SD, so multiplying by 0.6745 puts the score on the same scale as a normal z-score, and the 3.5 cut-off (Iglewicz & Hoaglin) means "very unusual".
+- *MAD = 0 fallback* (Q1): ten ₹649 Netflix bills → every deviation is 0 except the odd one → MAD = 0 → divide by zero. Mean absolute deviation still sees the outlier: `(6490 − 649) / (1.253314 × 584.1) ≈ 7.98` → flagged. All values equal → nothing is unusual → all scores 0.
+- *One-sided* (`M > 3.5` only): a ₹20 order in a ₹500 category is not worth a warning.
+- *At least 8 debits per category*: with 3 data points, "unusual" is meaningless.
+- *Decimal until the very end*: the median of `[1, 2]` is exactly `1.5`; only the final score becomes a float, and it is never stored as money.
+- *Budgets use integer maths*: `spent × 100 < limit × 80` — no percentages as floats, so 79.999…% can't be rounded into "warning".
+- *Refunds are income* (Q3) and *transfers are excluded* everywhere, so moving money between your own accounts is not "spending".
+
+**One thing that could go wrong**
+- A category that mixes very different things (e.g. Food & Dining = ₹20 teas *and* ₹800 dinners) gets a low median, so ordinary dinners can look less "normal". On the synthetic data the median for Food is ₹20 because teas dominate; the ₹8,400 party order is still flagged (score ≈ 17), but a ₹1,500 dinner might be too in real data. Fix if needed: more specific categories or rules.
+
+**Quiz questions**
+1. Compute the median and MAD of `[10, 10, 10, 12, 50]` by hand. Which branch of `robust_scores` runs, and is 50 flagged?
+2. Why would an ordinary z-score (mean and standard deviation) fail to flag the ₹5,000 order in the example above?
+3. Why are credits and transfers excluded from anomaly detection?

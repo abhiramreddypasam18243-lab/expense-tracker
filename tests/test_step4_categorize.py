@@ -33,9 +33,8 @@ def category_of(conn, description_norm):
     return (row[0], row[1]) if row else None
 
 
-def test_ac_23_seed_once():
-    conn = db.connect(":memory:")
-    cat.seed_defaults(conn)
+def test_ac_23_seed_once(conn):
+    # the fixture already seeded once; seeding again must change nothing
     first = (len(cat.list_categories(conn)), len(cat.list_rules(conn)))
     cat.seed_defaults(conn)
     assert (len(cat.list_categories(conn)), len(cat.list_rules(conn))) == first

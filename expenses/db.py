@@ -225,6 +225,57 @@ def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
     conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
 
 
+# --- insights -----------------------------------------------------------------------------------
+
+_TXN_WITH_CATEGORY = """
+    SELECT t.*, COALESCE(c.name, 'Uncategorised') AS category_name,
+           COALESCE(c.kind, 'expense') AS category_kind, COALESCE(c.color, '#9CA3AF') AS category_color
+    FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+"""
+
+
+def transactions_between(conn: sqlite3.Connection, start: date, end: date) -> list[sqlite3.Row]:
+    """Transactions with start <= txn_date < end, joined with their category."""
+    return conn.execute(
+        _TXN_WITH_CATEGORY + " WHERE t.txn_date >= ? AND t.txn_date < ? ORDER BY t.txn_date, t.id",
+        (start.isoformat(), end.isoformat()),
+    ).fetchall()
+
+
+def non_transfer_debits(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """All debits outside transfer categories, whole history (anomaly input, decision Q2)."""
+    return conn.execute(
+        _TXN_WITH_CATEGORY + " WHERE t.amount_minor < 0 AND COALESCE(c.kind, 'expense') != 'transfer'"
+        " ORDER BY t.id"
+    ).fetchall()
+
+
+# --- budgets ---------------------------------------------------------------------------------------
+
+
+def upsert_budget(conn: sqlite3.Connection, category_id: int, limit_minor: int) -> None:
+    conn.execute(
+        "INSERT INTO budgets (category_id, monthly_limit_minor) VALUES (?, ?)"
+        " ON CONFLICT(category_id) DO UPDATE SET monthly_limit_minor = excluded.monthly_limit_minor",
+        (category_id, limit_minor),
+    )
+
+
+def delete_budget(conn: sqlite3.Connection, category_id: int) -> None:
+    conn.execute("DELETE FROM budgets WHERE category_id = ?", (category_id,))
+
+
+def list_budgets(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT b.category_id, b.monthly_limit_minor, c.name, c.color, c.kind"
+        " FROM budgets b JOIN categories c ON c.id = b.category_id ORDER BY c.name"
+    ).fetchall()
+
+
+def get_category(conn: sqlite3.Connection, category_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM categories WHERE id = ?", (category_id,)).fetchone()
+
+
 # --- exchange-rate cache -----------------------------------------------------------------
 
 

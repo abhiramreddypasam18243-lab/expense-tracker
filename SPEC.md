@@ -154,19 +154,19 @@ Each import returns an `ImportReport` with `batch_id`, `rows_total`, `rows_impor
 
 The goal is to flag debits that are unusually large **for their category**.
 
-- **Population**: debits only. Work with `x = abs(amount_minor)`, grouped by category, over the **whole stored history** (see open question Q2). Transfers are excluded.
+- **Population**: debits only. Work with `x = abs(amount_minor)`, grouped by category, over the **whole stored history** (decision Q2). Transfers are excluded.
 - **Score**: `M_i = 0.6745 × (x_i − median) / MAD`, where `MAD = median(|x_i − median|)` (Iglewicz & Hoaglin).
 - **Flag** when `M_i > 3.5`. This is one-sided: unusually *small* spends are not interesting.
 - **Minimum sample**: a category with fewer than **8** debits produces no flags.
-- **MAD = 0** (more than half the values are identical): the behaviour is open question **Q1**. The proposed default is to flag any `x_i > median` as long as the category still has ≥ 8 debits, giving `score = inf`.
+- **MAD = 0** (more than half the values are identical), decision **Q1**: fall back to the **mean absolute deviation**, `MeanAD = mean(|x_i − median|)`, and use `M_i = (x_i − median) / (1.253314 × MeanAD)`. The same `> 3.5` threshold applies. If MeanAD is also 0 (every value identical), nothing is flagged. The constant 1.253314 ≈ √(π/2) makes MeanAD comparable to a standard deviation for normal data, just as 0.6745 does for MAD.
 - **Computation**: use `Decimal` or exact integer maths for the median and MAD. Floats are allowed only for the final score value, which is displayed and never stored as money.
-- **Output**: a list of `(transaction_id, category, amount_minor, median_minor, score)`, sorted by score in descending order.
+- **Output**: a list of `(transaction_id, category, amount_minor, median_minor, score)`, sorted by score in descending order. `median_minor` may end in .5 paise when the count is even, so it is stored as a `Decimal`, used for display only.
 
 ### 6.2 Monthly summary
 
 For a given month (`YYYY-MM`):
 
-- Total income (credits excluding Transfers)
+- Total income (credits excluding Transfers; refunds count as income under Refunds, decision Q3)
 - Total spend (debits excluding Transfers)
 - Net
 - Spend per category, sorted in descending order
@@ -340,7 +340,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-29** Budget status is ok, warning or over at the 79%, 80%, 100% and 101% boundaries.
 - **AC-30** The modified z-score matches a hand-computed example to 3 decimals. The values for this example are `[100,110,120,130,140,150,160,5000]` in rupees, and the 5000 is flagged.
 - **AC-31** A category with fewer than 8 debits produces no flags. Credits and Transfers are never flagged.
-- **AC-32** The MAD = 0 case behaves as decided in Q1.
+- **AC-32** MAD = 0 uses the mean-AD fallback (Q1). For `[649 × 9, 6490]` rupees, the 6490 is flagged and the 649s are not. If every value is identical, nothing is flagged.
 
 **CLI (Step 6)**
 
@@ -387,9 +387,9 @@ These must be answered by the owner before the step that needs them. Each one ha
 
 | ID | Question | Needed in | Proposed default |
 |---|---|---|---|
-| Q1 | When MAD = 0, what do we flag? | Step 5 | Flag any `x > median` (score = ∞) if the category has ≥ 8 debits |
-| Q2 | Anomaly window: the whole history, or a trailing 12 months? | Step 5 | Whole history |
-| Q3 | Should refunds (credits matching an earlier merchant) reduce category spend? | Step 5 | No, they count as income under the Refunds category |
+| ~~Q1~~ | ~~When MAD = 0, what do we flag?~~ | Step 5 | **Decided 2026-10-12: mean-AD fallback** |
+| ~~Q2~~ | ~~Anomaly window?~~ | Step 5 | **Decided 2026-10-12: whole history** |
+| ~~Q3~~ | ~~Should refunds reduce category spend?~~ | Step 5 | **Decided 2026-10-12: no, they count as income** |
 | ~~Q4~~ | ~~Should de-duplication be per account, or global?~~ | Step 3 | **Decided 2026-10-12: per account** |
 | ~~Q5~~ | ~~Should non-INR rows be rejected or ignored?~~ | Step 3 | **Decided 2026-10-12: convert to INR with live rates (I8)** |
 
@@ -403,6 +403,9 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-12 | **Q4**: de-duplication is per account (the account is in the fingerprint) | Two accounts can genuinely have identical rows (e.g. rent paid from both) |
 | 2026-10-12 | **Q5**: non-INR rows are converted to INR on import using **live online ECB rates** (Frankfurter), rule I8 | Owner's choice. **This amends the Part B privacy rule "no network calls at runtime"** with one narrow exception: only a currency code and date are sent, the call is made only for non-INR rows, results are cached, and offline means the row is rejected, never guessed |
 | 2026-10-12 | The fingerprint uses the original currency and amount, not the converted INR | A re-import stays a duplicate regardless of the rate |
+| 2026-10-12 | **Q1**: when MAD = 0, use the mean-absolute-deviation fallback `(x − median) / (1.253314 × MeanAD)`; if MeanAD = 0 too, flag nothing | Standard practice (IBM SPSS); avoids both divide-by-zero and the noise of "flag anything above median" |
+| 2026-10-12 | **Q2**: anomalies are computed over the whole stored history | Simplest; a personal tracker holds months, not decades |
+| 2026-10-12 | **Q3**: refunds are income (Refunds category) and do not reduce category spend | Transparent; avoids fuzzy merchant matching |
 
 ---
 
