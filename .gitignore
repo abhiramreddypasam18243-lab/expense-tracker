@@ -1,0 +1,15 @@
+# Private data — never commit
+data/
+*.db
+*.sqlite
+.env
+*.csv
+
+# Python / tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
