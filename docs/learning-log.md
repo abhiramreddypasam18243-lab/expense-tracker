@@ -44,3 +44,29 @@
 1. Walk through `parse_amount("(Rs. 1,23,456.7)")` step by step. What is the result, and which branch sets the sign?
 2. Why do we validate with a regex *before* calling `Decimal(...)`? Give an input that would slip through otherwise.
 3. Why is `"-500 Dr"` rejected instead of being treated as `-50000`?
+
+## Step 3 — Import, storage, de-duplication, currency (AC-13 to AC-22, AC-44 to AC-48) — 2026-10-12
+
+**What was built**
+- `expenses/db.py`: SQLite schema (categories, rules, budgets, import_batches, transactions, fx_rates) and the only SQL in the project.
+- `expenses/importer.py`: header detection (I3), normalisation + merchant (I4), bad-row reports (I6), import report + undo (I7), currency path (I8).
+- `expenses/fingerprint.py`: `fingerprint()` and `OccurrenceCounter` (**[LEARN] I5** — written by Claude at the owner's request).
+- `expenses/fx.py`: live ECB rate fetch (Frankfurter), Decimal JSON parsing, half-even conversion. The only module that touches the network (decision Q5).
+
+**Why it is designed this way**
+- *De-dup lives in the database*: `fingerprint TEXT UNIQUE` + `INSERT OR IGNORE`. If `rowcount == 0` the row was a duplicate. The DB guarantees uniqueness even if two imports race — Python code can't forget to check.
+- *Occurrence index*: two ₹20 teas on 5 Jan → keys get occurrence 0 and 1 → different hashes → both kept. Re-importing the file numbers them 0 and 1 again → both detected as duplicates. Overlapping statements work the same way.
+- *Fingerprint uses the original currency/amount*: `$12.34` is always `USD|-1234`, so a re-import matches even if the INR conversion were different.
+- *Per account* (Q4): `HDFC|…|IMPS RENT` ≠ `SBI|…|IMPS RENT`.
+- *One file = one DB transaction* (`with conn:`): a crash halfway leaves nothing half-imported.
+- *Undo by batch*: every row stores its `batch_id`; `ON DELETE CASCADE` removes exactly that batch's rows.
+- *Rates*: `json.loads(body, parse_float=Decimal)` builds `Decimal("90.3")` straight from the text — never a float. Cached per `(currency, date)` in SQLite, so the network is used at most once per pair; failures are remembered for the rest of that import so a dead network costs one timeout, not one per row.
+- *Fetcher is injected*: `import_csv(..., fetch_rate=...)` — tests pass a fake, so the suite never goes online.
+
+**One thing that could go wrong**
+- The `|`-joined fingerprint is ambiguous in theory: account `A|B` + description `C` and account `A` + description `B|C` hash the same. Fix if ever needed: hash `json.dumps([...])` instead, which escapes separators. Also: if a bank *changes its description text* between two exports of the same period (e.g. adds a reference), the rows will not match and will be imported twice.
+
+**Quiz questions**
+1. A statement has three identical ₹20 tea rows on one day. You import it, then import an overlapping statement containing only two of them. How many tea rows are stored, and why?
+2. Why does the fingerprint use `orig_amount_minor` instead of the converted INR `amount_minor`?
+3. What would break if `import_csv` inserted each row in its own transaction instead of wrapping the whole file in `with conn:`?

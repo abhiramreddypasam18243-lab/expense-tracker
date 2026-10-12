@@ -28,9 +28,9 @@ Everything runs locally in a container. No data ever leaves the machine.
 - G4. Automatic, editable categorisation using keyword rules.
 - G5. Clear insights: monthly summary, category breakdown, budgets, and anomaly flags.
 - G6. A clean, modern, easy-to-read UI (section 7.2).
-- G7. Privacy by default: no network, no telemetry, and no sensitive values in logs.
+- G7. Privacy by default: no telemetry and no sensitive values in logs. The only network call is the exchange-rate lookup in I8, which sends a currency code and a date, nothing else.
 
-**Non-goals** (see also section 14): multi-user accounts, bank APIs or scraping, PDF statements, ML or LLM categorisation, multi-currency, mobile app.
+**Non-goals** (see also section 14): multi-user accounts, bank APIs or scraping, PDF statements, ML or LLM categorisation, multi-currency *accounting* (everything is stored and reported in INR; foreign rows are converted on import, see I8), mobile app.
 
 ## 3. Domain model
 
@@ -38,11 +38,12 @@ All money is a **signed integer in minor units (paise)**. **Debits are negative 
 
 | Entity | Fields |
 |---|---|
-| **Transaction** | `id` (int PK), `account` (str), `txn_date` (ISO date), `description` (raw str), `description_norm` (str), `merchant` (str or null), `amount_minor` (int, signed), `category_id` (FK), `category_source` (`rule` / `manual` / `default`), `fingerprint` (str, unique), `batch_id` (FK), `created_at` (ISO datetime) |
+| **Transaction** | `id` (int PK), `account` (str), `txn_date` (ISO date), `description` (raw str), `description_norm` (str), `merchant` (str or null), `amount_minor` (int, signed, **always INR paise**), `orig_currency` (ISO code, `INR` for most rows), `orig_amount_minor` (int, signed, in the original currency's minor units), `fx_rate` (Decimal as TEXT, null for INR), `category_id` (FK), `category_source` (`rule` / `manual` / `default`), `fingerprint` (str, unique), `batch_id` (FK), `created_at` (ISO datetime) |
 | **ImportBatch** | `id`, `source_name` (file name only), `account`, `imported_at`, `rows_total`, `rows_imported`, `rows_duplicate`, `rows_rejected` |
 | **Category** | `id`, `name` (unique), `kind` (`expense` / `income` / `transfer`), `color` (hex, used by the UI) |
 | **Rule** | `id`, `pattern` (case-insensitive substring), `category_id`, `priority` (int, lower runs first) |
 | **Budget** | `category_id` (unique), `monthly_limit_minor` (int > 0) |
+| **FxRate** | `currency`, `rate_date` (the transaction date asked for), `rate` (Decimal as TEXT: INR per 1 unit), `source_date` (the date the provider answered with), `fetched_at`; primary key `(currency, rate_date)` |
 
 Storage: **SQLite** through the standard-library `sqlite3` module. The file is `data/expenses.db` by default and can be overridden with `EXPENSES_DB`. The schema is created on first run and versioned through `PRAGMA user_version`.
 
@@ -90,6 +91,7 @@ The header row is matched case-insensitively, ignoring spaces, dots and undersco
 | amount | amount, txn amount, transaction amount |
 | debit | debit, withdrawal, withdrawal amt, dr |
 | credit | credit, deposit, deposit amt, cr |
+| currency (optional) | currency, ccy, curr, currency code |
 
 A file is valid if it has a **date**, a **description**, and either an **amount** column or a **debit + credit** pair. If both forms exist, `amount` wins.
 
@@ -108,9 +110,12 @@ Encoding: UTF-8, with or without a BOM. Blank lines and lines with only commas a
 
 ### I5. Fingerprint and de-duplication [LEARN]
 
-`fingerprint = sha256("{account}|{txn_date ISO}|{amount_minor}|{description_norm}|{occurrence}")` as a hex string.
+`fingerprint = sha256("{account}|{txn_date ISO}|{orig_currency}|{orig_amount_minor}|{description_norm}|{occurrence}")` as a hex string.
 
-- `occurrence` is 0 for the first time this exact `(account, date, amount, description_norm)` tuple appears **inside the same file**, 1 for the second, and so on. This keeps two genuine identical transactions on one day, such as two ₹20 tea purchases.
+- The **original** currency and amount are used (not the converted INR amount), so a re-import is still recognised as a duplicate even if a rate were different. For INR rows, `orig_amount_minor == amount_minor`.
+- `account` is part of the fingerprint, so de-duplication is **per account** (decision Q4).
+
+- `occurrence` is 0 for the first time this exact `(account, date, orig_currency, orig_amount, description_norm)` tuple appears **inside the same file**, 1 for the second, and so on. This keeps two genuine identical transactions on one day, such as two ₹20 tea purchases.
 - `fingerprint` has a UNIQUE constraint. On import, a row whose fingerprint already exists is counted as a **duplicate** and skipped.
 - Result: re-importing a file adds 0 rows. Importing an overlapping statement adds only the new rows.
 
@@ -123,6 +128,17 @@ A row that fails I1 or I2 is **rejected**, not fatal. The import report lists `(
 Each import returns an `ImportReport` with `batch_id`, `rows_total`, `rows_imported`, `rows_duplicate`, `rows_rejected` and `errors: list[(line, reason)]`. Every import is saved as an ImportBatch.
 
 **Undo**: deleting a batch deletes exactly the transactions it inserted.
+
+### I8. Currency conversion (decision Q5)
+
+- If the file has a **currency** column, a blank cell or `INR` means INR. Any other ISO 4217 code (3 letters) is converted to INR on import. Without a currency column, every row is INR.
+- The original amount is parsed with I1 into minor units of that currency (I1's two-decimal limit applies; three-decimal currencies such as KWD are rejected).
+- **Rate source**: live **ECB reference rates** from Frankfurter, `GET https://api.frankfurter.dev/v1/{txn_date}?from={CUR}&to=INR` (no API key). It uses the rate for the **transaction date**; for a weekend or holiday, the provider answers with the previous business day, which is stored as `source_date`.
+- **Privacy**: the request carries only the currency code and the date: no amounts, descriptions, merchants or account names. The call lives only in `expenses/fx.py`, uses standard-library `urllib.request` with a 5-second timeout, and is made only when a non-INR row is imported.
+- **Cache**: every fetched rate is stored in the FxRate table. A `(currency, date)` pair is fetched at most once, ever. Re-imports and tests work offline once the rate is cached.
+- **Exactness**: the JSON is parsed with `json.loads(..., parse_float=Decimal)` so the rate is never a float. `amount_minor = (orig_amount_minor × rate)` rounded to a whole paisa with **ROUND_HALF_EVEN**. This is the only place in the system where money is rounded.
+- **Failure**: if the network is down, the provider has no rate, or the code is unknown, the row is **rejected** with the reason "exchange rate unavailable" (I6). It is never guessed.
+- **Testability**: the importer takes the rate lookup as an injectable function, so tests never touch the network.
 
 ## 5. Categorisation
 
@@ -235,7 +251,8 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 
 ## 9. Privacy and security
 
-- No network calls at runtime. The test suite includes a check that core modules do not import `requests`, `urllib.request`, `http.client` or `socket`.
+- No network calls at runtime **except the exchange-rate lookup in I8** (decision Q5). A test checks that no module other than `expenses/fx.py` imports `requests`, `urllib.request`, `http.client` or `socket`, and that `fx.py` only contacts `api.frankfurter.dev`.
+- The container therefore needs outbound HTTPS. Without it, foreign-currency rows are rejected while INR rows import normally.
 - Logging: at INFO level and above, log only counts, IDs and timings, never descriptions, merchants or amounts. DEBUG is off by default.
 - Uploaded files are processed in memory and never written to disk. Only the parsed rows go to SQLite.
 - `data/`, `*.db` and `.env` are git-ignored and excluded by `.dockerignore`.
@@ -251,6 +268,7 @@ expense tracker/
     dates.py                # I2
     importer.py             # I3, I4, I6, I7
     fingerprint.py          # I5
+    fx.py                   # I8 — the only module allowed to use the network
     db.py                   # schema, repository functions
     categorize.py           # section 5
     insights.py             # 6.2, 6.3
@@ -302,6 +320,11 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-20** Merchant extraction gives the expected merchant for UPI dash and slash forms and for POS descriptions, and null otherwise.
 - **AC-21** `undo_import(batch_id)` removes exactly that batch's rows.
 - **AC-22** Captured logs at INFO level during an import contain no description, merchant or amount from the file.
+- **AC-44** A file with a currency column converts a USD row using an injected rate: `$12.34` at `90.3` gives 111430 paise (`1234 × 90.3 = 111430.2`). `orig_currency` and `orig_amount_minor` are stored, and INR or blank-currency rows are unchanged.
+- **AC-45** Rounding is ROUND_HALF_EVEN: rate `0.5` turns 1 minor unit into 0 paise and 3 minor units into 2 paise.
+- **AC-46** A rate lookup that fails (raises or returns nothing) rejects only that row, with the reason "exchange rate unavailable". The other rows import.
+- **AC-47** Rates are cached: importing two USD rows on the same date, and then re-importing the file, calls the lookup exactly once.
+- **AC-48** `fx.parse_rate_response` reads the Frankfurter JSON into a `Decimal` (never a float) and returns the provider's date. A malformed body raises `FxError`.
 
 **Categorisation (Step 4)**
 
@@ -337,7 +360,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-40** The Dockerfile runs as non-root and has a HEALTHCHECK. `docker compose up -d --build` becomes healthy (manual check, recorded in the learning log).
 - **AC-41** With `EXPENSES_PUBLIC=1` and no `EXPENSES_PASSPHRASE_HASH`, startup refuses. With the hash set, a wrong passphrase is rejected and the right one is accepted.
 - **AC-42** In demo mode the banner is shown and the database is not `data/expenses.db`.
-- **AC-43** Core modules do not import network libraries (section 9).
+- **AC-43** No module except `expenses/fx.py` imports network libraries, and `fx.py`'s only URL is `api.frankfurter.dev` (section 9).
 
 ## 13. Build order
 
@@ -345,7 +368,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 |---|---|---|
 | 1 | Walking skeleton: structure, `requirements.txt`, `pyproject.toml`, `.gitignore`, `.dockerignore`, `git init`, Dockerfile + compose, a "Hello" Streamlit page, the synthetic generator | AC-38, AC-39, AC-40 |
 | 2 | Money and dates — **[LEARN] I1** | AC-01 – AC-12 |
-| 3 | Importer, SQLite, fingerprint, de-dup, undo — **[LEARN] I5** | AC-13 – AC-22 |
+| 3 | Importer, SQLite, fingerprint, de-dup, undo, currency conversion — **[LEARN] I5** | AC-13 – AC-22, AC-44 – AC-48 |
 | 4 | Categorisation | AC-23 – AC-26 |
 | 5 | Insights, budgets, anomalies — **[LEARN] 6.1** | AC-27 – AC-32 |
 | 6 | CLI | AC-33 – AC-34 |
@@ -356,7 +379,7 @@ Rebuild the container after every step.
 
 ## 14. Out of scope
 
-Multi-user support and login (other than the passphrase gate), bank APIs, PDF or XLS import, ML or LLM categorisation, multi-currency, recurring-payment detection, split transactions, attachments and receipts, mobile app, and cloud sync.
+Multi-user support and login (other than the passphrase gate), bank APIs, PDF or XLS import, ML or LLM categorisation, multi-currency reporting or offline rate tables, recurring-payment detection, split transactions, attachments and receipts, mobile app, and cloud sync.
 
 ## 15. Open questions
 
@@ -367,8 +390,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | Q1 | When MAD = 0, what do we flag? | Step 5 | Flag any `x > median` (score = ∞) if the category has ≥ 8 debits |
 | Q2 | Anomaly window: the whole history, or a trailing 12 months? | Step 5 | Whole history |
 | Q3 | Should refunds (credits matching an earlier merchant) reduce category spend? | Step 5 | No, they count as income under the Refunds category |
-| Q4 | Should de-duplication be per account (account in the fingerprint), or global? | Step 3 | Per account (as written in I5) |
-| Q5 | Should non-INR rows (a currency column present) be rejected or ignored? | Step 3 | Reject the row with the reason "non-INR currency" |
+| ~~Q4~~ | ~~Should de-duplication be per account, or global?~~ | Step 3 | **Decided 2026-10-12: per account** |
+| ~~Q5~~ | ~~Should non-INR rows be rejected or ignored?~~ | Step 3 | **Decided 2026-10-12: convert to INR with live rates (I8)** |
 
 ## 16. Decisions log
 
@@ -377,6 +400,9 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-12 | The spec was drafted by Claude, because the original spec.md held only the working agreement | The owner chose "Claude drafts the spec" |
 | 2026-10-12 | Spec approved by owner; file renamed `spec.md` → `SPEC.md` | Part B refers to SPEC.md; case matters on Linux/git |
 | 2026-10-12 | Dependencies split: `requirements.txt` (runtime, goes in the image) + `requirements-dev.txt` (pytest, pytest-cov, ruff) | Keeps test tools out of the container; same pinned versions as section 11 |
+| 2026-10-12 | **Q4**: de-duplication is per account (the account is in the fingerprint) | Two accounts can genuinely have identical rows (e.g. rent paid from both) |
+| 2026-10-12 | **Q5**: non-INR rows are converted to INR on import using **live online ECB rates** (Frankfurter), rule I8 | Owner's choice. **This amends the Part B privacy rule "no network calls at runtime"** with one narrow exception: only a currency code and date are sent, the call is made only for non-INR rows, results are cached, and offline means the row is rejected, never guessed |
+| 2026-10-12 | The fingerprint uses the original currency and amount, not the converted INR | A re-import stays a duplicate regardless of the rate |
 
 ---
 
@@ -409,7 +435,7 @@ I am an undergraduate student building this as a graded project. I will be quizz
 ## Project rules
 
 - Money: parse with Decimal, store as signed integers in minor units, never use float. Format only for display.
-- Privacy: no network calls at runtime, no telemetry, no downloading models. Logs at normal levels must not contain descriptions, merchants or amounts.
+- Privacy: no network calls at runtime, no telemetry, no downloading models. Logs at normal levels must not contain descriptions, merchants or amounts. *(Amended 2026-10-12, decision Q5: one exception, the exchange-rate lookup in rule I8.)*
 - Data: never create, commit or print real bank data. Use only the synthetic generator in tools/make_synthetic.py. The database and data/ are git-ignored.
 - Structure: core logic in plain Python modules with no UI imports. The CLI and the Streamlit UI are thin layers over the core.
 - Dependencies: pin versions in requirements.txt. Ask before adding a new dependency.
