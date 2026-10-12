@@ -12,6 +12,7 @@ import streamlit as st
 from expenses import insights
 
 CONN_KEY = "_conn"
+DB_PATH_KEY = "_db_path"
 
 
 def get_conn() -> sqlite3.Connection:

@@ -82,9 +82,14 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def default_path() -> str:
+    """$EXPENSES_DB if set, else data/expenses.db."""
+    return os.environ.get("EXPENSES_DB") or DEFAULT_DB_PATH
+
+
 def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
     """Open (and if needed create) the database. ':memory:' is allowed for tests."""
-    path = str(path or os.environ.get("EXPENSES_DB", DEFAULT_DB_PATH))
+    path = str(path or default_path())
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)

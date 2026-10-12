@@ -3,8 +3,9 @@
 import pandas as pd
 import streamlit as st
 
-from expenses import db
+from expenses import auth, db
 from expenses.importer import HEADER_SEARCH_ROWS, HeaderNotFoundError, import_csv, undo_import
+from ui import demo
 from ui.common import esc, eyebrow, get_conn, nice_date, page_header
 
 conn = get_conn()
@@ -14,20 +15,39 @@ page_header(
 
 accounts = db.list_accounts(conn)
 
+is_demo = auth.load_config().demo
+submitted = False
+
+# --- demo: synthetic statements only (spec 7.2) ---------------------------------------------------------
+if is_demo:
+    with st.container(border=True):
+        eyebrow("New import")
+        st.markdown(
+            "Uploads are turned off in the demo. Add another **synthetic** statement instead — "
+            "it uses a different random seed, so you'll see new rows (and how duplicates are handled)."
+        )
+        if st.button(
+            "Add a synthetic statement", key="demo_import", type="primary", icon=":material/science:"
+        ):
+            seed = demo.DEMO_SEED + len(db.list_batches(conn))
+            st.session_state["last_report"] = demo.import_synthetic(conn, seed, "Demo Credit Card")
+            st.toast("Imported a synthetic statement", icon=":material/check_circle:")
+
 # --- upload form -------------------------------------------------------------------------------------
-with st.container(border=True):
-    eyebrow("New import")
-    with st.form("import_form", clear_on_submit=True, border=False):
-        upload = st.file_uploader(
-            "Statement (CSV)", type=["csv"], help="Processed in memory; never saved to disk."
-        )
-        account = st.text_input(
-            "Account name",
-            value=accounts[0] if accounts else "",
-            placeholder="e.g. HDFC Savings",
-            help="Used to keep accounts apart. The same row in two accounts is not a duplicate.",
-        )
-        submitted = st.form_submit_button("Import statement", type="primary", icon=":material/upload:")
+else:
+    with st.container(border=True):
+        eyebrow("New import")
+        with st.form("import_form", clear_on_submit=True, border=False):
+            upload = st.file_uploader(
+                "Statement (CSV)", type=["csv"], help="Processed in memory; never saved to disk."
+            )
+            account = st.text_input(
+                "Account name",
+                value=accounts[0] if accounts else "",
+                placeholder="e.g. HDFC Savings",
+                help="Used to keep accounts apart. The same row in two accounts is not a duplicate.",
+            )
+            submitted = st.form_submit_button("Import statement", type="primary", icon=":material/upload:")
 
 if submitted:
     if upload is None:

@@ -274,10 +274,11 @@ expense tracker/
     categorize.py           # section 5
     insights.py             # 6.2, 6.3
     anomaly.py              # 6.1
-    auth.py                 # passphrase gate (8.1)
+    auth.py                 # runtime config + passphrase gate (8.1)
     exporter.py             # CSV export used by the CLI and the UI (7.1, 7.2)
     __main__.py / cli.py    # 7.1
   tools/make_synthetic.py   # synthetic statement generator
+  tools/hash_passphrase.py  # creates EXPENSES_PASSPHRASE_HASH (passphrase read without echo)
   tests/                    # test_ac_XX_*.py
   docs/learning-log.md
   Dockerfile, docker-compose.yml, .dockerignore, .gitignore
@@ -413,6 +414,10 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-12 | UI theme defines both light and dark palettes in `.streamlit/config.toml`; the app follows the viewer's system setting | One accent colour per theme keeps the look calm in both |
 | 2026-10-12 | Budget bars are drawn with small HTML/CSS (green / orange / red by status) instead of `st.progress` | `st.progress` can't change colour, so over-budget wasn't visible at a glance |
 | 2026-10-12 | Ruff ignores line length (E501) in `ui/*.py` only | UI files hold HTML/markdown snippets that read worse when split |
+| 2026-10-12 | Passphrase hash format is `pbkdf2_sha256:<iterations>:<salt>:<hash>` (600,000 iterations), made by `tools/hash_passphrase.py` | `:` instead of the usual `$`, because docker-compose would treat `$` in env values as variable substitution |
+| 2026-10-12 | The gate is shown whenever a hash is set, not only with EXPENSES_PUBLIC=1; a wrong attempt waits 0.5 s | Setting a hash is a clear intent to lock; the delay slows guessing |
+| 2026-10-12 | "Config refuses to start" = the app serves only an error message and no pages | Streamlit has no pre-start hook; no page or data is reachable, which is the safety goal |
+| 2026-10-12 | Demo mode gives each visitor their own temporary SQLite file seeded with synthetic data and budgets; Import shows an "Add a synthetic statement" button instead of an uploader | Interprets "Import is limited to synthetic files": real files can't be uploaded at all, and visitors can't see each other's changes |
 
 ---
 
@@ -462,6 +467,8 @@ I am an undergraduate student building this as a graded project. I will be quizz
 - Coverage: pytest --cov=expenses --cov-report=term-missing
 - Lint: ruff check .
 - Run the deployed service: docker compose up -d --build, then open http://localhost:8501
+- Demo mode (synthetic data, throwaway DB): set EXPENSES_DEMO=1 (locally: `EXPENSES_DEMO=1 streamlit run app.py`)
+- Passphrase gate: python tools/hash_passphrase.py, then run with EXPENSES_PUBLIC=1 and EXPENSES_PASSPHRASE_HASH=<output>
 
 (Update this list as the project's real commands appear.)
 

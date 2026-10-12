@@ -159,3 +159,26 @@
 1. Why does the Transactions page change the `st.data_editor` key after saving a category change? What bug would happen without it?
 2. Where does the number on a dashboard bar come from, and why is it OK to use `paise // 100` there but not in `insights.py`?
 3. What does AC-36 check, and how does that protect the "thin UI" rule?
+
+## Step 8 — Hardening: passphrase gate, demo mode, network check (AC-41 to AC-43) — 2026-10-12
+
+**What was built**
+- `expenses/auth.py`: `load_config` (reads `EXPENSES_PUBLIC`, `EXPENSES_PASSPHRASE_HASH`, `EXPENSES_DEMO`), `hash_passphrase` / `verify_passphrase` (salted PBKDF2-HMAC-SHA256, 600,000 iterations, constant-time compare).
+- `ui/gate.py` (lock screen), `ui/demo.py` (per-visitor throwaway demo database), `tools/hash_passphrase.py`.
+- `app.py` now: refuse on unsafe config → gate → demo banner → pages. `docker-compose.yml` documents the runtime env vars.
+- AC-43 test: only `expenses/fx.py` may import network libraries, and its only host is `api.frankfurter.dev`.
+
+**Why it is designed this way**
+- *Store a hash, never the passphrase*: if someone reads the env/compose file they get `pbkdf2_sha256:600000:<salt>:<hash>`, not the passphrase. The **salt** means two users with the same passphrase get different hashes (no pre-computed tables); **600,000 iterations** make each guess slow (~0.3 s) for an attacker but cost a real user once.
+- *`hmac.compare_digest`*: a normal `==` stops at the first different character, so response time leaks how much of the hash matched. `compare_digest` always takes the same time.
+- *`:` separator*: docker-compose would read `$600000` in an env value as a variable and silently corrupt the hash.
+- *Fail closed*: `EXPENSES_PUBLIC=1` without a hash → only an error message is served, no pages, no data.
+- *Demo DB per visitor* in the system temp folder: the real `data/expenses.db` is never opened, and visitors can't see each other's edits. The test checks that `$EXPENSES_DB` is not even created.
+
+**One thing that could go wrong**
+- The gate protects the *UI*; it is not a full auth system (no accounts, no lockout after N tries, no HTTPS by itself). Anyone exposing the app beyond localhost should also put it behind HTTPS (a reverse proxy) — otherwise the passphrase travels in plain text on the network.
+
+**Quiz questions**
+1. Why is a salted, slow hash (PBKDF2, 600k iterations) better than storing `sha256(passphrase)`?
+2. What timing information could leak if we compared hashes with `==`, and how does `compare_digest` stop it?
+3. In demo mode, why does every visitor get their own temporary database instead of sharing one?

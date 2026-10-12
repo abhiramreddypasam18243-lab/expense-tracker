@@ -7,6 +7,12 @@ services:
     volumes:
       - expenses-data:/app/data
     restart: unless-stopped
+    # Optional settings, passed at runtime (never baked into the image). Put them in a
+    # git-ignored .env file next to this one and uncomment `env_file`.
+    #   EXPENSES_DEMO=1                synthetic demo data in a throwaway database
+    #   EXPENSES_PUBLIC=1              you expose the app beyond localhost -> passphrase required
+    #   EXPENSES_PASSPHRASE_HASH=...   from `python tools/hash_passphrase.py`
+    # env_file: .env
 
 volumes:
   expenses-data:
