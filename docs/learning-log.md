@@ -217,3 +217,13 @@
   - public mode (env from `docker-compose.public.yml`, self-signed cert): HEALTHCHECK over **https → PASS**; plain http **refused**.
   - Not covered without Docker: the image build itself (`useradd`, `COPY --chown`, volume permissions) and compose's `!override` / `${VAR:?}` handling. Run `docker compose up -d --build` once Docker is installed.
 - **Older database** (created with the Step 8 code, commit 800bd75): opening it with Step 9 code keeps 14 categories and 20 ATM rows in Uncategorised (seeding never edits an existing DB, AC-23). Adding *Cash* + the three ATM rules via the Settings functions and clicking *Re-run rules* moved all 20 rows to Cash, leaving 0 Uncategorised.
+
+### Docker verification — 2026-10-13 (closes the manual parts of AC-40 and AC-52)
+
+Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy of the committed code:
+- `docker compose config`: both files valid; the public override **without** a hash fails with
+  "required variable EXPENSES_PASSPHRASE_HASH is missing a value: Set EXPENSES_PASSPHRASE_HASH (run python tools/hash_passphrase.py)".
+- Localhost mode: image builds, container **healthy** after ~10 s, published on **127.0.0.1:8501** only, runs as **appuser (uid 10001)**, `/app` has no tests, docs, `.venv`, data or certificates.
+- Data volume: 290 rows imported inside the container as the non-root user, still there after `docker compose restart`.
+- Public mode: **healthy** over HTTPS, published on 0.0.0.0:8501, https health `ok`, plain http **refused**.
+- Test containers, volumes, image and scratch folder were removed afterwards.
