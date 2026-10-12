@@ -227,3 +227,23 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 - Data volume: 290 rows imported inside the container as the non-root user, still there after `docker compose restart`.
 - Public mode: **healthy** over HTTPS, published on 0.0.0.0:8501, https health `ok`, plain http **refused**.
 - Test containers, volumes, image and scratch folder were removed afterwards.
+
+## Step 10 — Desktop app and internet-demo entry point (AC-58, AC-59) — 2026-10-13
+
+**What was built**
+- `launcher/start.ps1`, `stop.ps1`, `install-shortcuts.ps1`, `icon.ico`: Desktop + Start-menu shortcuts. Double-click → container starts in WSL Docker → app opens in its own Edge window (`--app=`).
+- `demo_app.py`: the only file ever deployed publicly; it forces demo mode before running `app.py`.
+
+**Why it is designed this way**
+- *Reuse, don't rebuild*: the "desktop app" is the same verified container plus a launcher, so there is one code path to test, and real data stays in the Docker volume on this PC.
+- *Health first*: if the app is already running, the launcher just opens the window (fast); otherwise it starts it and waits for `/_stcore/health` with a 3-minute limit and a clear error message.
+- *Forced demo entry point*: hosting settings can be mistyped; `demo_app.py` overwrites `EXPENSES_DEMO=1` and deletes `EXPENSES_PUBLIC`, `EXPENSES_PASSPHRASE_HASH` and `EXPENSES_DB`, so a hosted copy can only ever show synthetic data.
+
+**One thing that went wrong (found in the manual check)**
+- The first launcher used `http://localhost:8501`. Windows PowerShell resolves `localhost` to IPv6 `::1` first, WSL only forwards IPv4, so every health check timed out and the launcher would have waited 3 minutes and then shown a wrong error — while the app was actually running. curl tried IPv4 straight away, which hid the bug. Fix: use `127.0.0.1`. After the fix: stopped container → app window open in **9 s**.
+- A test leak: `demo_app.py` sets `EXPENSES_DEMO=1` in the shared pytest process; `monkeypatch.delenv` on an unset variable records nothing to undo, so later tests ran in demo mode. `monkeypatch.setenv(..., "0")` first makes pytest restore it.
+
+**Quiz questions**
+1. Why does the launcher check health *before* running `docker compose up`?
+2. Why is `127.0.0.1` safer than `localhost` for talking to a service inside WSL from Windows?
+3. What exactly stops a hosted copy of this app from ever showing real bank data?

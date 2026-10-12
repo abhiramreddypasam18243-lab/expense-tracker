@@ -266,6 +266,18 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 - The container HEALTHCHECK uses `https` when a certificate is configured.
 - **Public hosting** is allowed only with `EXPENSES_DEMO=1`.
 
+### 8.2 Desktop app (Windows launcher)
+
+- `launcher/start.ps1`: if `http://127.0.0.1:8501/_stcore/health` is not already `ok`, run `docker compose up -d --build` in the WSL distribution (default `Ubuntu`) for this project folder, show a "Starting…" notification, and wait up to 3 minutes for health. Then open the app in its **own window** with Microsoft Edge app mode (`msedge --app=http://127.0.0.1:8501`). On failure it shows a message box that says what to check.
+- `launcher/stop.ps1`: `docker compose stop` (data is kept).
+- `launcher/install-shortcuts.ps1`: creates **Expense Tracker** and **Stop Expense Tracker** shortcuts on the Desktop and in the Start menu, using `launcher/icon.ico`.
+- The launcher only ever uses the localhost compose file; it never starts public mode.
+
+### 8.3 Internet demo
+
+- `demo_app.py` is the entry point for public hosting. It **forces** `EXPENSES_DEMO=1` and removes `EXPENSES_PUBLIC`, `EXPENSES_PASSPHRASE_HASH` and `EXPENSES_DB` before running `app.py`, so a hosted copy can never show anything but synthetic data, whatever the host's settings are.
+- Host: **Streamlit Community Cloud** (free; deploys `demo_app.py` from a GitHub repository, which may stay private). Publishing needs the owner's GitHub and Streamlit accounts.
+
 ## 9. Privacy and security
 
 - No network calls at runtime **except the exchange-rate lookup in I8** (decision Q5). A test checks that no module other than `expenses/fx.py` imports `requests`, `urllib.request`, `http.client` or `socket`, and that `fx.py` only contacts `api.frankfurter.dev`.
@@ -392,6 +404,8 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-54** These are not recurring: variable amounts (> ±10 %), irregular gaps (e.g. 10 or 60 days), only 2 payments, credits, and transfers. A group whose last payment is more than 40 days before the newest transaction is reported with `active = False`.
 - **AC-55** On synthetic data, Rent and the monthly Spotify subscription are detected. The Insights page shows "Recurring payments", and `python -m expenses recurring` exits 0 and lists them.
 - **AC-57** Anomalies must also be at least 2× the category median: with 12 × ₹649, 6 × ₹119 and tickets of ₹677–₹2,000 (MAD = ₹28), only ₹2,000 is flagged, even though ₹800 alone scores above 3.5.
+- **AC-58** The launcher scripts exist; `start.ps1` checks health before starting, waits for health with a timeout, opens `msedge --app=http://127.0.0.1:8501`, and never references the public compose file; `install-shortcuts.ps1` creates Desktop and Start-menu shortcuts with `icon.ico`; `icon.ico` is a valid ICO file. Manual check: double-clicking the shortcut opens the app window (recorded in the learning log).
+- **AC-59** `demo_app.py` always runs in demo mode: even with `EXPENSES_PUBLIC=1`, no hash and `EXPENSES_DB` set, it shows the demo banner and seeded data, and never creates the `EXPENSES_DB` file.
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -407,6 +421,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 7 | Streamlit UI (all pages, theme, empty states) | AC-35 – AC-37 |
 | 8 | Hardening: passphrase gate, demo mode, network check | AC-41 – AC-43 |
 | 9 | Extras: merchant acronyms, Cash/ATM rules, HTTPS for public mode, recurring payments, original currency in export, anomaly 2× rule | AC-49 – AC-57 |
+| 10 | Desktop app launcher and internet-demo entry point | AC-58 – AC-59 |
 
 Rebuild the container after every step.
 
@@ -455,6 +470,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-12 | The synthetic generator adds a fixed monthly ₹119 Spotify payment on the 12th | Gives the recurring detector a realistic subscription; it uses no random numbers, so the rest of the generated data is unchanged |
 | 2026-10-12 | Export's extra columns are named `Original Currency` / `Original Amount`, not `Currency` | `Currency` is an import alias (I3), so re-importing the export would convert the INR amount a second time |
 | 2026-10-12 | **Anomaly 2× rule**: flag only if `M > 3.5` and the amount is at least 2× the category median (owner's choice) | Adding the monthly Spotify payment exposed a MAD weakness: 14 of 29 Entertainment payments were ₹649, so MAD = ₹0.69 and every cinema ticket looked "unusual". The 2× materiality check is simple to explain and keeps the real outliers |
+| 2026-10-13 | **Step 10**: Windows desktop launcher (Docker in WSL + Edge app window) and a public demo on Streamlit Community Cloud (owner's choice: "Desktop app + internet demo") | Real data stays on the PC; only the forced-demo entry point is ever hosted |
+| 2026-10-13 | The launcher uses `127.0.0.1`, not `localhost` | Found in the manual check: Windows PowerShell resolves `localhost` to IPv6 `::1` first, which WSL doesn't forward, so the health check hung |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---
@@ -505,6 +522,7 @@ I am an undergraduate student building this as a graded project. I will be quizz
 - Coverage: pytest --cov=expenses --cov-report=term-missing
 - Lint: ruff check .
 - Run the deployed service: docker compose up -d --build, then open http://localhost:8501
+- Desktop app: run launcher/install-shortcuts.ps1 once, then use the Expense Tracker shortcut
 - Demo mode (synthetic data, throwaway DB): set EXPENSES_DEMO=1 (locally: `EXPENSES_DEMO=1 streamlit run app.py`)
 - Passphrase gate: python tools/hash_passphrase.py, then run with EXPENSES_PUBLIC=1 and EXPENSES_PASSPHRASE_HASH=<output>
 
