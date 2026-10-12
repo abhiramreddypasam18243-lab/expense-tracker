@@ -209,3 +209,11 @@
 1. Why does `MAD = ₹0.69` produce false anomalies, and why didn't the Q1 mean-AD fallback catch it?
 2. Rent rows look like `IMPS RENT SYN123456 SYN LANDLORD`. How does the recurring detector group six of them together, and which check would fail if the rent changed from ₹22,000 to ₹25,000 halfway?
 3. Why must public mode require HTTPS even though there is already a passphrase?
+
+### Verification — 2026-10-12 (manual parts of AC-40 and AC-52, and the "older database" note)
+
+- **Container rehearsal on Linux (no Docker available).** WSL Ubuntu 24.04, Python 3.12.3 (same minor version as `python:3.12-slim`), non-root user, build context = git-tracked files minus `tests/` and `docs/` (41 files, no `.db`/`.csv`/`.pem`), `pip install -r requirements.txt` (streamlit 1.65.0), then the **exact** `CMD` and `HEALTHCHECK` commands parsed from the Dockerfile:
+  - default mode: HEALTHCHECK over **http → PASS**; a 290-row synthetic import works in the `data/` layout.
+  - public mode (env from `docker-compose.public.yml`, self-signed cert): HEALTHCHECK over **https → PASS**; plain http **refused**.
+  - Not covered without Docker: the image build itself (`useradd`, `COPY --chown`, volume permissions) and compose's `!override` / `${VAR:?}` handling. Run `docker compose up -d --build` once Docker is installed.
+- **Older database** (created with the Step 8 code, commit 800bd75): opening it with Step 9 code keeps 14 categories and 20 ATM rows in Uncategorised (seeding never edits an existing DB, AC-23). Adding *Cash* + the three ATM rules via the Settings functions and clicking *Re-run rules* moved all 20 rows to Cash, leaving 0 Uncategorised.
