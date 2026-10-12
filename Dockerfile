@@ -22,8 +22,9 @@ USER appuser
 
 EXPOSE 8501
 
+# Uses https when a certificate is configured (public mode); the self-signed cert is not verified here.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4)"
+    CMD python -c "import os, ssl, urllib.request; s = 'https' if os.environ.get('STREAMLIT_SERVER_SSL_CERT_FILE') else 'http'; urllib.request.urlopen(f'{s}://127.0.0.1:8501/_stcore/health', timeout=4, context=ssl._create_unverified_context())"
 
 # 0.0.0.0 is inside the container only; docker-compose publishes on 127.0.0.1.
 CMD ["streamlit", "run", "app.py", \

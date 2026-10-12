@@ -182,3 +182,30 @@
 1. Why is a salted, slow hash (PBKDF2, 600k iterations) better than storing `sha256(passphrase)`?
 2. What timing information could leak if we compared hashes with `==`, and how does `compare_digest` stop it?
 3. In demo mode, why does every visitor get their own temporary database instead of sharing one?
+
+## Step 9 — Extras (AC-49 to AC-57) — 2026-10-12
+
+**What was built** (the five suggestions from Step 8, approved by the owner, plus one fix they exposed)
+- Merchant display keeps acronyms: `PVR Cinemas`, `KFC`, `HDFC Life` (`importer.display_name`).
+- `Cash` category with `ATM WDL` / `ATM CASH` / `CASH WDL` rules.
+- Public mode needs HTTPS: Streamlit's own TLS or a declared proxy (`EXPENSES_TLS_PROXY=1`); `docker-compose.public.yml` override; HEALTHCHECK speaks https when a certificate is set.
+- `expenses/recurring.py` + `python -m expenses recurring` + an Insights card: monthly subscriptions and fixed bills.
+- Export keeps `Original Currency` and `Original Amount`.
+- Anomaly **2× rule** (owner's choice): flagged spends must also be at least twice the category's typical amount.
+
+**Why it is designed this way**
+- *Not plain `ATM`*: substring rules match anywhere, and `TRE-ATM-ENT` contains it. A hospital bill would have become "Cash". Longer patterns are safer.
+- *Vowel-less words stay upper case*: a cheap, explainable acronym test — `PVR`, `KFC`, `HDFC` have no vowels; `SWIGGY` does. It is a heuristic (e.g. `IRCTC` → `Irctc`), and that's acceptable for display text.
+- *HTTPS in public mode*: the passphrase gate is useless if the passphrase travels in plain text over Wi-Fi. Streamlit can serve TLS itself, so no new dependency; compose's `${VAR:?message}` makes `docker compose up` fail loudly if the hash is missing.
+- *Recurring = monthly + stable amount*: rent (₹22,000 on the 3rd) and Spotify (₹119 on the 12th) pass; electricity (₹900–₹2,500) fails the ±10 % check; chai (many per month) fails the 20–40-day gap check. References like `SYN123456` are stripped from the grouping key so each month's rent row groups together.
+- *Export column names*: calling it `Currency` would make our own importer treat the INR amount as a foreign amount and convert it a second time.
+- *The 2× rule*: adding Spotify made Entertainment = 14 × ₹649 + 6 × ₹119 + cinema tickets (29 rows). 14 is *just under half*, so MAD wasn't 0 (no fallback) but ₹0.69 — and dividing by ₹0.69 makes a ₹677 ticket score ~27. Requiring "at least 2× typical" keeps real outliers (₹65,000 vs ₹2,826) and drops noise.
+
+**One thing that could go wrong**
+- The new Cash category and ATM rules are only seeded into a **fresh** database (seeding never edits an existing one, AC-23). On an older database, add them in Settings.
+- HTTPS was verified locally (self-signed certificate: `https` health → ok, plain `http` refused); the Docker build itself is still unverified on this machine.
+
+**Quiz questions**
+1. Why does `MAD = ₹0.69` produce false anomalies, and why didn't the Q1 mean-AD fallback catch it?
+2. Rent rows look like `IMPS RENT SYN123456 SYN LANDLORD`. How does the recurring detector group six of them together, and which check would fail if the rent changed from ₹22,000 to ₹25,000 halfway?
+3. Why must public mode require HTTPS even though there is already a passphrase?

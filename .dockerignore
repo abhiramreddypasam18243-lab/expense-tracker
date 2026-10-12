@@ -6,6 +6,8 @@ data
 *.sqlite
 *.csv
 .env
+certs
+*.pem
 __pycache__
 *.pyc
 .pytest_cache

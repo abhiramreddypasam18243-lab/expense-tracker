@@ -2,7 +2,9 @@
 
 M = 0.6745 * (x - median) / MAD            (Iglewicz & Hoaglin)
 If MAD == 0:  M = (x - median) / (1.253314 * MeanAD)    (decision Q1)
-Flag debits with M > 3.5 in categories with at least 8 debits, whole history (Q2).
+Flag debits with M > 3.5 AND amount >= 2 x the category median, in categories with at
+least 8 debits, whole history (Q2). The 2x rule (AC-57) stops tiny-but-nonzero MADs from
+flagging ordinary spends when one fixed amount, like a subscription, dominates a category.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from expenses import db
 
 THRESHOLD = 3.5
 MIN_COUNT = 8
+MIN_MULTIPLE = 2  # must also be at least this many times the typical (median) spend
 MAD_CONSTANT = Decimal("0.6745")
 MEANAD_CONSTANT = Decimal("1.253314")
 
@@ -96,7 +99,8 @@ def find_anomalies(
         values = [-row["amount_minor"] for row in rows]  # x = abs(debit)
         typical = median(values)
         for row, score in zip(rows, robust_scores(values), strict=True):
-            if score > threshold:
+            # Statistically unusual AND materially bigger: x >= 2 x median (exact Decimal check).
+            if score > threshold and -row["amount_minor"] >= typical * MIN_MULTIPLE:
                 found.append(
                     Anomaly(
                         row["id"],

@@ -4,6 +4,7 @@ Environment variables:
   EXPENSES_PUBLIC=1             the operator exposes the app beyond localhost -> passphrase required
   EXPENSES_PASSPHRASE_HASH=...  output of tools/hash_passphrase.py (never the passphrase itself)
   EXPENSES_DEMO=1               demo mode: synthetic data in a throwaway database
+  EXPENSES_TLS_PROXY=1          an HTTPS reverse proxy is in front (else Streamlit's own TLS is required)
 
 Hash format: pbkdf2_sha256:<iterations>:<salt hex>:<hash hex>. ':' is used instead of the
 usual '$' because docker-compose treats '$' in env values as variable substitution.
@@ -52,7 +53,8 @@ def verify_passphrase(passphrase: str, encoded: str) -> bool:
     return hmac.compare_digest(digest.hex(), expected_hex)
 
 
-def load_config(env: Mapping[str, str] | None = None) -> Config:
+def load_config(env: Mapping[str, str] | None = None, tls_enabled: bool = False) -> Config:
+    """Read and validate the runtime settings. `tls_enabled`: Streamlit itself serves HTTPS."""
     env = os.environ if env is None else env
     public = env.get("EXPENSES_PUBLIC", "").strip() == "1"
     demo = env.get("EXPENSES_DEMO", "").strip() == "1"
@@ -61,6 +63,12 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         raise ConfigError(
             "EXPENSES_PUBLIC=1 but EXPENSES_PASSPHRASE_HASH is not set. Refusing to serve: create one with "
             "`python tools/hash_passphrase.py` and pass it as an environment variable."
+        )
+    if public and not (tls_enabled or env.get("EXPENSES_TLS_PROXY", "").strip() == "1"):
+        raise ConfigError(
+            "EXPENSES_PUBLIC=1 needs HTTPS, or the passphrase would cross the network in plain text. Set "
+            "STREAMLIT_SERVER_SSL_CERT_FILE and STREAMLIT_SERVER_SSL_KEY_FILE, or EXPENSES_TLS_PROXY=1 if an "
+            "HTTPS reverse proxy is in front."
         )
     if passphrase_hash is not None and not _HASH_FORMAT.match(passphrase_hash):
         raise ConfigError("EXPENSES_PASSPHRASE_HASH is malformed; generate it with tools/hash_passphrase.py.")

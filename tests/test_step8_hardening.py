@@ -18,7 +18,7 @@ NETWORK_IMPORT = re.compile(
 
 @pytest.fixture
 def clean_env(tmp_path, monkeypatch):
-    for name in ("EXPENSES_PUBLIC", "EXPENSES_PASSPHRASE_HASH", "EXPENSES_DEMO"):
+    for name in ("EXPENSES_PUBLIC", "EXPENSES_PASSPHRASE_HASH", "EXPENSES_DEMO", "EXPENSES_TLS_PROXY"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("EXPENSES_DB", str(tmp_path / "gate.db"))
     return monkeypatch
@@ -50,7 +50,7 @@ def test_ac_41_config_rules():
     with pytest.raises(auth.ConfigError):
         auth.load_config({"EXPENSES_PUBLIC": "1", "EXPENSES_PASSPHRASE_HASH": "not-a-hash"})
     good = auth.hash_passphrase("pw", iterations=1000)
-    config = auth.load_config({"EXPENSES_PUBLIC": "1", "EXPENSES_PASSPHRASE_HASH": good})
+    config = auth.load_config({"EXPENSES_PUBLIC": "1", "EXPENSES_PASSPHRASE_HASH": good}, tls_enabled=True)
     assert config.public and config.passphrase_hash == good
 
 
@@ -65,6 +65,7 @@ def test_ac_41_public_without_hash_refuses(clean_env):
 def test_ac_41_wrong_then_right_passphrase(clean_env):
     clean_env.setenv("EXPENSES_PUBLIC", "1")
     clean_env.setenv("EXPENSES_PASSPHRASE_HASH", auth.hash_passphrase("open sesame", iterations=1000))
+    clean_env.setenv("EXPENSES_TLS_PROXY", "1")  # AC-51: public mode needs HTTPS
     at = run_app()
     assert not [t for t in at.title if t.value == "Dashboard"]
 

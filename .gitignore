@@ -4,6 +4,8 @@ data/
 *.sqlite
 .env
 *.csv
+certs/
+*.pem
 
 # Python / tooling
 .venv/

@@ -12,7 +12,7 @@ st.logo("ui/assets/logo.svg", size="large", icon_image="ui/assets/icon.svg")
 
 # 1. Refuse to serve anything if the configuration is unsafe (spec 8.1).
 try:
-    config = auth.load_config()
+    config = auth.load_config(tls_enabled=bool(st.get_option("server.sslCertFile")))
 except auth.ConfigError as exc:
     st.error(str(exc), icon=":material/gpp_bad:")
     st.stop()

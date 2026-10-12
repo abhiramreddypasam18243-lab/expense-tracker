@@ -106,7 +106,7 @@ Encoding: UTF-8, with or without a BOM. Blank lines and lines with only commas a
   - UPI (`UPI/<ref>/<NAME>/...` or `UPI-<NAME>-...`) gives `<NAME>`.
   - POS / card (`POS <digits> <NAME>`) gives `<NAME>`.
   - Otherwise the merchant is null.
-- Merchant names are title-cased for display.
+- Merchant names are formatted for display: each word is capitalised (`SWIGGY` → `Swiggy`), except words with no vowels or with digits, which stay upper case because they are usually acronyms or codes (`PVR CINEMAS` → `PVR Cinemas`, `KFC`, `HDFC LIFE` → `HDFC Life`).
 
 ### I5. Fingerprint and de-duplication [LEARN]
 
@@ -142,8 +142,8 @@ Each import returns an `ImportReport` with `batch_id`, `rows_total`, `rows_impor
 
 ## 5. Categorisation
 
-- **Default categories** are seeded on first run: Food & Dining, Groceries, Transport, Shopping, Bills & Utilities, Rent, Entertainment, Health, Education, Travel, Salary (income), Refunds (income), Transfers (transfer), Uncategorised. Each has a fixed colour from the UI palette.
-- **Default rules** are about 30 keyword rules, for example `SWIGGY` and `ZOMATO` → Food & Dining, `UBER` and `OLA` → Transport, `AMAZON` → Shopping, `SALARY` → Salary.
+- **Default categories** are seeded on first run: Food & Dining, Groceries, Transport, Shopping, Bills & Utilities, Rent, Entertainment, Health, Education, Travel, Salary (income), Refunds (income), Transfers (transfer), Cash (expense), Uncategorised. Each has a fixed colour from the UI palette.
+- **Default rules** are about 40 keyword rules, including `ATM WDL`, `ATM CASH` and `CASH WDL` → Cash (not plain `ATM`, which also matches "TRE**ATM**ENT"), for example `SWIGGY` and `ZOMATO` → Food & Dining, `UBER` and `OLA` → Transport, `AMAZON` → Shopping, `SALARY` → Salary.
 - **Matching**: rules are tried in ascending `priority`, then by `id`. The first rule whose pattern is a substring of `description_norm` wins. With no match, a debit goes to **Uncategorised** (`category_source = default`).
 - **Manual override**: the user can set a transaction's category, which stores `category_source = manual`. **"Re-run rules"** recategorises only rows whose source is not `manual`.
 - Users can add, edit and delete rules and categories. Deleting a category moves its transactions to Uncategorised.
@@ -156,7 +156,7 @@ The goal is to flag debits that are unusually large **for their category**.
 
 - **Population**: debits only. Work with `x = abs(amount_minor)`, grouped by category, over the **whole stored history** (decision Q2). Transfers are excluded.
 - **Score**: `M_i = 0.6745 × (x_i − median) / MAD`, where `MAD = median(|x_i − median|)` (Iglewicz & Hoaglin).
-- **Flag** when `M_i > 3.5`. This is one-sided: unusually *small* spends are not interesting.
+- **Flag** when `M_i > 3.5` **and** `x_i ≥ 2 × median` (decision after Step 9, AC-57). This is one-sided: unusually *small* spends are not interesting. The 2× rule stops a tiny but non-zero MAD — e.g. a ₹649 subscription that is just under half of a category's payments, giving MAD = ₹0.69 — from flagging ordinary spends.
 - **Minimum sample**: a category with fewer than **8** debits produces no flags.
 - **MAD = 0** (more than half the values are identical), decision **Q1**: fall back to the **mean absolute deviation**, `MeanAD = mean(|x_i − median|)`, and use `M_i = (x_i − median) / (1.253314 × MeanAD)`. The same `> 3.5` threshold applies. If MeanAD is also 0 (every value identical), nothing is flagged. The constant 1.253314 ≈ √(π/2) makes MeanAD comparable to a standard deviation for normal data, just as 0.6745 does for MAD.
 - **Computation**: use `Decimal` or exact integer maths for the median and MAD. Floats are allowed only for the final score value, which is displayed and never stored as money.
@@ -182,6 +182,19 @@ There is an optional monthly limit per expense category. For a month the status 
 - `warning` when spent is between 80% and 100%
 - `over` when spent is above 100%
 
+### 6.4 Recurring payments
+
+Spot subscriptions and fixed monthly bills.
+
+- **Population**: debits outside transfer categories, whole history (like 6.1).
+- **Grouping key**: the merchant if known, otherwise `description_norm` with every word containing a digit removed (so `IMPS RENT SYN123456 SYN LANDLORD` and `IMPS RENT SYN654321 SYN LANDLORD` group together).
+- **A group is recurring** when all of these hold:
+  - at least **3** payments, in at least 3 different months;
+  - **every** gap between consecutive payments is **20–40 days** (monthly);
+  - **every** amount is within **±10 %** of the group's median amount (integer check: `|x − median| × 100 ≤ median × 10`).
+- **Output** per group: name, category, typical (median) amount, number of payments, last date, typical interval (median gap, days), **next expected date** (last date + median gap), and **active** = the last payment is no more than 40 days before the newest transaction in the database.
+- Sorted by typical amount, largest first.
+
 ## 7. Interfaces
 
 ### 7.1 CLI (`python -m expenses …`, argparse, standard library only)
@@ -193,7 +206,8 @@ There is an optional monthly limit per expense category. For a month the status 
 | `summary --month YYYY-MM` | Monthly summary (6.2) |
 | `anomalies` | Anomaly list (6.1) |
 | `recategorize` | Re-run rules on non-manual rows |
-| `export <out.csv> [--month YYYY-MM]` | Export transactions to CSV, with amounts as plain decimals |
+| `export <out.csv> [--month YYYY-MM]` | Export transactions to CSV, with amounts as plain INR decimals plus `Original Currency` and `Original Amount` columns |
+| `recurring` | Recurring payments (6.4) |
 | `undo-import <batch_id>` | Delete a batch |
 
 Exit code is 0 on success, 1 on user error (bad file or bad arguments), and 2 on an internal error.
@@ -227,7 +241,7 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
    - A file uploader, an account name field and an Import button.
    - The result is shown as 4 metric chips (total, imported, duplicate, rejected) plus a rejected-rows table.
    - An import history list with Undo.
-4. **Insights**: the anomaly table with an explanation of each score ("₹8,400 vs typical ₹450 in Food & Dining"), and the top merchants.
+4. **Insights**: the anomaly table with an explanation of each score ("₹8,400 vs typical ₹450 in Food & Dining"), the top merchants, and a **Recurring payments** card (6.4) with the total per month, each payment's typical amount, next expected date and an Active / Stopped badge.
 5. **Settings**: tabs for Categories, Rules (add, edit, delete, reorder by priority, and Re-run rules) and Budgets.
 
 **Demo mode** (`EXPENSES_DEMO=1`): a banner reads "Demo — synthetic data". The database is in-memory or temporary and seeded from `tools/make_synthetic.py`, and Import is limited to synthetic files.
@@ -247,6 +261,9 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
   - Mounts a named volume (or `./data`) at `/app/data` for the database.
   - Has no secrets in the file.
 - **Passphrase gate**: if `EXPENSES_PUBLIC=1` (meaning the operator intends to publish beyond localhost), the app refuses to start unless `EXPENSES_PASSPHRASE_HASH` is set. Every session must then enter the passphrase, which is checked against a salted PBKDF2 hash using `hmac.compare_digest`. The passphrase is passed in at runtime and never stored in the image.
+- **HTTPS when public**: with `EXPENSES_PUBLIC=1`, the app also refuses to start unless the traffic is encrypted — either Streamlit's own TLS is on (`STREAMLIT_SERVER_SSL_CERT_FILE` and `STREAMLIT_SERVER_SSL_KEY_FILE`, no new dependency) or the operator declares an HTTPS reverse proxy in front with `EXPENSES_TLS_PROXY=1`. Without it, the passphrase would cross the network in plain text.
+- **`docker-compose.public.yml`** (an override file): publishes on all interfaces, sets `EXPENSES_PUBLIC=1`, requires `EXPENSES_PASSPHRASE_HASH` (compose fails with an error if it is missing), and mounts `./certs` (git- and docker-ignored) for the TLS certificate. Usage: `docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build`. The base `docker-compose.yml` stays localhost-only.
+- The container HEALTHCHECK uses `https` when a certificate is configured.
 - **Public hosting** is allowed only with `EXPENSES_DEMO=1`.
 
 ## 9. Privacy and security
@@ -365,6 +382,18 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-42** In demo mode the banner is shown and the database is not `data/expenses.db`.
 - **AC-43** No module except `expenses/fx.py` imports network libraries, and `fx.py`'s only URL is `api.frankfurter.dev` (section 9).
 
+**Extras (Step 9)**
+
+- **AC-49** Merchant display: `POS 1102 PVR CINEMAS` → `PVR Cinemas`, `UPI/R1/KFC/OKAXIS` → `KFC`, `UPI-HDFC LIFE-R2-PREMIUM` → `HDFC Life`, `POS 9 MCDONALD'S` → `Mcdonald's`. The AC-20 cases are unchanged.
+- **AC-50** A fresh database has a `Cash` expense category and the `ATM WDL`, `ATM CASH` and `CASH WDL` rules. `ATM WDL 123` → Cash, `HOSPITAL TREATMENT` → Health (not Cash). Synthetic data has no Uncategorised rows.
+- **AC-51** `EXPENSES_PUBLIC=1` with a valid hash but no TLS and no `EXPENSES_TLS_PROXY=1` is refused. With Streamlit TLS on, or with `EXPENSES_TLS_PROXY=1`, it is accepted. The hash is still required (AC-41).
+- **AC-52** `docker-compose.public.yml` publishes `0.0.0.0:8501`, sets `EXPENSES_PUBLIC: "1"`, requires `${EXPENSES_PASSPHRASE_HASH:?...}`, and sets both Streamlit TLS paths. The base compose file still binds 127.0.0.1 only. `certs/` and `*.pem` are git- and docker-ignored. Streamlit serving `/_stcore/health` over HTTPS is a manual check, recorded in the learning log.
+- **AC-53** Recurring detection on a fixture finds a monthly ₹649 subscription (4 payments) and a monthly ₹22,000 rent (3 payments, different references), with the correct typical amount, count, last date, next expected date and active flag.
+- **AC-54** These are not recurring: variable amounts (> ±10 %), irregular gaps (e.g. 10 or 60 days), only 2 payments, credits, and transfers. A group whose last payment is more than 40 days before the newest transaction is reported with `active = False`.
+- **AC-55** On synthetic data, Rent and the monthly Spotify subscription are detected. The Insights page shows "Recurring payments", and `python -m expenses recurring` exits 0 and lists them.
+- **AC-57** Anomalies must also be at least 2× the category median: with 12 × ₹649, 6 × ₹119 and tickets of ₹677–₹2,000 (MAD = ₹28), only ₹2,000 is flagged, even though ₹800 alone scores above 3.5.
+- **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
+
 ## 13. Build order
 
 | Step | Content | ACs |
@@ -377,12 +406,13 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 6 | CLI | AC-33 – AC-34 |
 | 7 | Streamlit UI (all pages, theme, empty states) | AC-35 – AC-37 |
 | 8 | Hardening: passphrase gate, demo mode, network check | AC-41 – AC-43 |
+| 9 | Extras: merchant acronyms, Cash/ATM rules, HTTPS for public mode, recurring payments, original currency in export, anomaly 2× rule | AC-49 – AC-57 |
 
 Rebuild the container after every step.
 
 ## 14. Out of scope
 
-Multi-user support and login (other than the passphrase gate), bank APIs, PDF or XLS import, ML or LLM categorisation, multi-currency reporting or offline rate tables, recurring-payment detection, split transactions, attachments and receipts, mobile app, and cloud sync.
+Multi-user support and login (other than the passphrase gate), bank APIs, PDF or XLS import, ML or LLM categorisation, multi-currency reporting or offline rate tables, non-monthly recurring payments (weekly, yearly), split transactions, attachments and receipts, mobile app, and cloud sync.
 
 ## 15. Open questions
 
@@ -418,6 +448,14 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-12 | The gate is shown whenever a hash is set, not only with EXPENSES_PUBLIC=1; a wrong attempt waits 0.5 s | Setting a hash is a clear intent to lock; the delay slows guessing |
 | 2026-10-12 | "Config refuses to start" = the app serves only an error message and no pages | Streamlit has no pre-start hook; no page or data is reachable, which is the safety goal |
 | 2026-10-12 | Demo mode gives each visitor their own temporary SQLite file seeded with synthetic data and budgets; Import shows an "Add a synthetic statement" button instead of an uploader | Interprets "Import is limited to synthetic files": real files can't be uploaded at all, and visitors can't see each other's changes |
+| 2026-10-12 | **Step 9 added** at the owner's request ("add them"): the five suggestions from the end of Step 8 | Owner approved the features; specified as AC-49 – AC-56 before coding |
+| 2026-10-12 | Cash rules use `ATM WDL`, `ATM CASH` and `CASH WDL`, not `ATM` | `ATM` is a substring of TREATMENT, so hospital bills would become Cash |
+| 2026-10-12 | Public mode requires HTTPS (Streamlit TLS or a declared proxy); AC-41's gate tests now run with `EXPENSES_TLS_PROXY=1` | Without TLS the passphrase crosses the network in plain text; Streamlit's built-in TLS needs no new dependency |
+| 2026-10-12 | Recurring = monthly only: ≥ 3 payments, every gap 20–40 days, every amount within ±10 % of the median | Simple, explainable rules; catches subscriptions and rent, skips variable bills and frequent small spends |
+| 2026-10-12 | The synthetic generator adds a fixed monthly ₹119 Spotify payment on the 12th | Gives the recurring detector a realistic subscription; it uses no random numbers, so the rest of the generated data is unchanged |
+| 2026-10-12 | Export's extra columns are named `Original Currency` / `Original Amount`, not `Currency` | `Currency` is an import alias (I3), so re-importing the export would convert the INR amount a second time |
+| 2026-10-12 | **Anomaly 2× rule**: flag only if `M > 3.5` and the amount is at least 2× the category median (owner's choice) | Adding the monthly Spotify payment exposed a MAD weakness: 14 of 29 Entertainment payments were ₹649, so MAD = ₹0.69 and every cinema ticket looked "unusual". The 2× materiality check is simple to explain and keeps the real outliers |
+| 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---
 

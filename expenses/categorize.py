@@ -29,6 +29,7 @@ DEFAULT_CATEGORIES = [
     ("Salary", "income", "#16A34A"),
     ("Refunds", "income", "#84CC16"),
     ("Transfers", "transfer", "#94A3B8"),
+    ("Cash", "expense", "#A16207"),
     (UNCATEGORISED, "expense", "#9CA3AF"),
 ]
 
@@ -72,6 +73,10 @@ DEFAULT_RULES = [
     ("IRCTC", "Travel", 100),
     ("MAKEMYTRIP", "Travel", 100),
     ("INDIGO", "Travel", 100),
+    # Not plain "ATM": it is a substring of "TREATMENT".
+    ("ATM WDL", "Cash", 100),
+    ("ATM CASH", "Cash", 100),
+    ("CASH WDL", "Cash", 100),
     ("RENT", "Rent", 200),  # broad (also inside "PARENT"), so it runs last
 ]
 

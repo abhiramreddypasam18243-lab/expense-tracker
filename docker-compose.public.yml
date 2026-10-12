@@ -1,0 +1,21 @@
+# Public / LAN mode — layered on top of docker-compose.yml:
+#
+#   python tools/hash_passphrase.py            # put the printed line in a git-ignored .env file
+#   mkdir certs && openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+#       -keyout certs/key.pem -out certs/cert.pem -subj "/CN=expense-tracker"
+#   docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build
+#
+# Then open https://<this-machine>:8501 (a self-signed certificate shows a browser warning once).
+# For anything on the internet, use demo mode only (EXPENSES_DEMO=1) — never real bank data.
+services:
+  app:
+    ports: !override
+      - "0.0.0.0:8501:8501"
+    environment:
+      EXPENSES_PUBLIC: "1"
+      # Compose stops with this message if the hash is missing, so the app can't go public unlocked.
+      EXPENSES_PASSPHRASE_HASH: ${EXPENSES_PASSPHRASE_HASH:?Set EXPENSES_PASSPHRASE_HASH (run python tools/hash_passphrase.py)}
+      STREAMLIT_SERVER_SSL_CERT_FILE: /certs/cert.pem
+      STREAMLIT_SERVER_SSL_KEY_FILE: /certs/key.pem
+    volumes:
+      - ./certs:/certs:ro

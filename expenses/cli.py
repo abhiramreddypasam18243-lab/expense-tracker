@@ -10,7 +10,7 @@ import logging
 import sys
 from collections.abc import Sequence
 
-from expenses import categorize, db, exporter, insights
+from expenses import categorize, db, exporter, insights, recurring
 from expenses.anomaly import find_anomalies
 from expenses.importer import HeaderNotFoundError, import_file, undo_import
 from expenses.money import format_inr
@@ -94,6 +94,21 @@ def cmd_anomalies(conn, args) -> None:
         )
 
 
+def cmd_recurring(conn, args) -> None:
+    found = recurring.find_recurring(conn)
+    if not found:
+        print("No recurring monthly payments found.")
+        return
+    print(f"{'Name':<24}  {'Category':<18}  {'Typical':>12}  {'Paid':>4}  {'Next expected':<13}  Status")
+    for r in found:
+        status = "active" if r.active else "stopped?"
+        typical = format_inr(int(r.typical_minor))
+        print(
+            f"{_shorten(r.name, 24):<24}  {_shorten(r.category, 18):<18}  {typical:>12}  "
+            f"{r.count:>4}  {r.next_date.isoformat():<13}  {status}"
+        )
+
+
 def cmd_recategorize(conn, args) -> None:
     changed = categorize.recategorize(conn)
     print(f"Recategorised {changed} transaction(s). Manual choices were kept.")
@@ -143,6 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("anomalies", help="unusually large spends")
     p.set_defaults(func=cmd_anomalies)
+
+    p = sub.add_parser("recurring", help="recurring monthly payments")
+    p.set_defaults(func=cmd_recurring)
 
     p = sub.add_parser("recategorize", help="re-run rules (manual choices are kept)")
     p.set_defaults(func=cmd_recategorize)

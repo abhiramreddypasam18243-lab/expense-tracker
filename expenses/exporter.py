@@ -10,7 +10,17 @@ from expenses import db
 from expenses.insights import month_range
 from expenses.money import to_plain
 
-HEADER = ["Date", "Description", "Amount", "Category", "Merchant", "Account"]
+# "Original Currency" (not "Currency"): "currency" is an import alias, and re-importing would convert twice.
+HEADER = [
+    "Date",
+    "Description",
+    "Amount",
+    "Category",
+    "Merchant",
+    "Account",
+    "Original Currency",
+    "Original Amount",
+]
 
 
 def export_csv(
@@ -37,6 +47,8 @@ def export_csv(
                 row["category_name"],
                 row["merchant"] or "",
                 row["account"],
+                row["orig_currency"],
+                to_plain(row["orig_amount_minor"]),
             ]
         )
     return buf.getvalue()

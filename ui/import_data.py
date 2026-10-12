@@ -15,7 +15,7 @@ page_header(
 
 accounts = db.list_accounts(conn)
 
-is_demo = auth.load_config().demo
+is_demo = auth.load_config(tls_enabled=bool(st.get_option("server.sslCertFile"))).demo
 submitted = False
 
 # --- demo: synthetic statements only (spec 7.2) ---------------------------------------------------------

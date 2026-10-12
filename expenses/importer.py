@@ -110,13 +110,25 @@ def normalize_description(text: str) -> str:
     return " ".join(text.split()).upper()
 
 
+def display_name(text: str) -> str:
+    """'PVR CINEMAS' -> 'PVR Cinemas', 'SWIGGY' -> 'Swiggy'.
+
+    Words with no vowels or with digits stay upper case: they are usually acronyms or codes.
+    """
+    words = []
+    for word in text.split():
+        keep = not re.search(r"[AEIOU]", word.upper()) or re.search(r"\d", word)
+        words.append(word.upper() if keep else word.capitalize())
+    return " ".join(words)
+
+
 def extract_merchant(description_norm: str) -> str | None:
-    """Best-effort merchant from UPI / POS descriptions, title-cased; None otherwise."""
+    """Best-effort merchant from UPI / POS descriptions, for display; None otherwise."""
     for pattern in (_UPI_SLASH, _UPI_DASH, _POS):
         match = pattern.match(description_norm)
         if match:
             name = match.group(1).strip()
-            return name.title() if name else None
+            return display_name(name) if name else None
     return None
 
 

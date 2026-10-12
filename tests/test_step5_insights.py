@@ -52,7 +52,7 @@ def test_ac_27_monthly_summary(conn):
     assert s.txn_count == 8
     assert [(c.name, c.spend_minor) for c in s.by_category] == [
         ("Shopping", 200_000),
-        (cat.UNCATEGORISED, 100_000),
+        ("Cash", 100_000),  # ATM WDL -> Cash since AC-50
         ("Food & Dining", 50_000),
         ("Transport", 15_000),
     ]

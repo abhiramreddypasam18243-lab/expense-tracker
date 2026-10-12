@@ -81,6 +81,8 @@ def generate_rows(seed: int, months: int = 6, start: date = date(2026, 1, 1)) ->
         rows.append((date(year, month, 1), "NEFT SALARY ACME SYNTHETIC LTD", 8_500_000))
         rows.append((date(year, month, 3), f"IMPS RENT {_ref(rng)} SYN LANDLORD", -2_200_000))
         rows.append((day(), f"IMPS SELF TRANSFER {_ref(rng)}", -500_000))
+        # Fixed monthly subscription (no random numbers used, so the rest of the data is unchanged).
+        rows.append((date(year, month, 12), "UPI-SPOTIFY-SUBSCRIPTION", -11_900))
         if rng.random() < 0.3:
             refund = rng.randint(20_000, 150_000)
             rows.append((day(), f"REFUND AMAZON RETAIL {_ref(rng)}", refund))
