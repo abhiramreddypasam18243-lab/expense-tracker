@@ -116,3 +116,24 @@
 1. Compute the median and MAD of `[10, 10, 10, 12, 50]` by hand. Which branch of `robust_scores` runs, and is 50 flagged?
 2. Why would an ordinary z-score (mean and standard deviation) fail to flag the ₹5,000 order in the example above?
 3. Why are credits and transfers excluded from anomaly detection?
+
+## Step 6 — CLI (AC-33, AC-34) — 2026-10-12
+
+**What was built**
+- `expenses/cli.py` + `expenses/__main__.py`: `python -m expenses import | list | summary | anomalies | recategorize | export | undo-import`, with a global `--db` option.
+- `expenses/exporter.py`: CSV export (shared with the UI later), plus `money.to_plain` and `db.list_transactions` (filters: month, category, account, search, limit).
+
+**Why it is designed this way**
+- *Thin layer*: each command is "parse args → call one core function → print". No business rules live in `cli.py`, so the UI in Step 7 reuses exactly the same core.
+- *Exit codes* 0 / 1 / 2: scripts can tell "you gave me a bad file" (1) from "the program is broken" (2). The internal-error message prints only the exception *type*, never its text, because the text could contain data.
+- *`main(argv)` returns an int instead of calling `sys.exit`*: tests call `cli.main([...])` directly and check the return code — no subprocess needed (one subprocess test checks `python -m expenses` itself).
+- *Export uses plain decimals* (`-1234.50`), not `₹1,234.50`: a machine-readable file must round-trip. AC-34 proves it: export → import into a fresh DB → identical amounts.
+- *`sys.stdout.reconfigure(encoding="utf-8")`*: Windows consoles default to cp1252, which cannot print ₹ and would crash with UnicodeEncodeError.
+
+**One thing that could go wrong**
+- Export writes the converted INR amount only, so a USD row comes back as INR on re-import — the original currency is lost in the file (it stays in the database). Fine for the INR-only round trip the spec asks for, but worth knowing.
+
+**Quiz questions**
+1. Why does `cli.main` map argparse's exit code 2 (bad arguments) to our exit code 1?
+2. Why must `export` write `-1234.50` rather than `-₹1,234.50`? What would happen on re-import?
+3. A command fails with an unexpected `KeyError('SECRET SHOP')`. What does the user see, and why don't we print the message?

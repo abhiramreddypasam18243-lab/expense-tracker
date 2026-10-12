@@ -48,6 +48,13 @@ def format_inr(minor: int) -> str:
     return f"{sign}₹{digits}.{paise:02d}"
 
 
+def to_plain(minor: int) -> str:
+    """Paise -> plain machine-readable decimal for CSV export: -123450 -> '-1234.50'."""
+    sign = "-" if minor < 0 else ""
+    rupees, paise = divmod(abs(minor), 100)
+    return f"{sign}{rupees}.{paise:02d}"
+
+
 def parse_amount(text: str) -> int:
     """Amount text -> signed paise. See SPEC section 4, rule I1.
 

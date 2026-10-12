@@ -274,6 +274,7 @@ expense tracker/
     insights.py             # 6.2, 6.3
     anomaly.py              # 6.1
     auth.py                 # passphrase gate (8.1)
+    exporter.py             # CSV export used by the CLI and the UI (7.1, 7.2)
     __main__.py / cli.py    # 7.1
   tools/make_synthetic.py   # synthetic statement generator
   tests/                    # test_ac_XX_*.py
@@ -406,6 +407,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-12 | **Q1**: when MAD = 0, use the mean-absolute-deviation fallback `(x − median) / (1.253314 × MeanAD)`; if MeanAD = 0 too, flag nothing | Standard practice (IBM SPSS); avoids both divide-by-zero and the noise of "flag anything above median" |
 | 2026-10-12 | **Q2**: anomalies are computed over the whole stored history | Simplest; a personal tracker holds months, not decades |
 | 2026-10-12 | **Q3**: refunds are income (Refunds category) and do not reduce category spend | Transparent; avoids fuzzy merchant matching |
+| 2026-10-12 | Added `expenses/exporter.py` and a global `--db` CLI option | Export is shared by the CLI and the UI's export button; `--db` lets tests and demos use a separate database |
+| 2026-10-12 | Export writes the converted INR amount only | AC-34 round trip is in INR; the original currency stays in the database |
 
 ---
 
@@ -450,6 +453,7 @@ I am an undergraduate student building this as a graded project. I will be quizz
 - Install: pip install -r requirements-dev.txt  (runtime only: requirements.txt)
 - Synthetic data: python tools/make_synthetic.py --seed 42 --layout amount --out data/synthetic.csv
 - Run locally without Docker: streamlit run app.py --server.address=127.0.0.1
+- CLI: python -m expenses --help  (e.g. python -m expenses import data/synthetic.csv --account "Demo Bank"; add --db PATH to use another database)
 - Run tests: pytest -q
 - Coverage: pytest --cov=expenses --cov-report=term-missing
 - Lint: ruff check .

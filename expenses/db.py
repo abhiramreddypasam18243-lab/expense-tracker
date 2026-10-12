@@ -242,6 +242,52 @@ def transactions_between(conn: sqlite3.Connection, start: date, end: date) -> li
     ).fetchall()
 
 
+def list_transactions(
+    conn: sqlite3.Connection,
+    start: date | None = None,
+    end: date | None = None,
+    category: str | None = None,
+    account: str | None = None,
+    search: str | None = None,
+    limit: int | None = None,
+    newest_first: bool = True,
+) -> list[sqlite3.Row]:
+    """Filtered transactions with category info. `end` is exclusive; `search` matches the description."""
+    where, params = [], []
+    if start:
+        where.append("t.txn_date >= ?")
+        params.append(start.isoformat())
+    if end:
+        where.append("t.txn_date < ?")
+        params.append(end.isoformat())
+    if category:
+        where.append("COALESCE(c.name, 'Uncategorised') = ?")
+        params.append(category)
+    if account:
+        where.append("t.account = ?")
+        params.append(account)
+    if search:
+        where.append("t.description_norm LIKE ?")
+        params.append(f"%{' '.join(search.split()).upper()}%")
+    sql = _TXN_WITH_CATEGORY
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    order = "DESC" if newest_first else "ASC"
+    sql += f" ORDER BY t.txn_date {order}, t.id {order}"
+    if limit:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    return conn.execute(sql, params).fetchall()
+
+
+def list_accounts(conn: sqlite3.Connection) -> list[str]:
+    return [r[0] for r in conn.execute("SELECT DISTINCT account FROM transactions ORDER BY account")]
+
+
+def batch_exists(conn: sqlite3.Connection, batch_id: int) -> bool:
+    return conn.execute("SELECT 1 FROM import_batches WHERE id = ?", (batch_id,)).fetchone() is not None
+
+
 def non_transfer_debits(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """All debits outside transfer categories, whole history (anomaly input, decision Q2)."""
     return conn.execute(
