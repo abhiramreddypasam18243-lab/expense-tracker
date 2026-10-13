@@ -17,8 +17,15 @@ def test_ac_58_launcher_scripts():
     assert "AddSeconds(" in start  # waits with a timeout
     assert "docker-compose.public.yml" not in start and "EXPENSES_PUBLIC" not in start
 
+    # WSL stops Ubuntu when no wsl.exe process is left: a hidden keep-alive holds it up (started once).
+    assert (
+        "expense-tracker-keepalive" in start and "sleep infinity" in start and "WindowStyle Hidden" in start
+    )
+    assert start.index("Start-KeepAlive") < start.index("docker compose up -d --build")
+
     stop = (LAUNCHER / "stop.ps1").read_text(encoding="utf-8")
     assert "docker compose stop" in stop and "down -v" not in stop  # never deletes data
+    assert "expense-tracker-keepalive" in stop and "Stop-Process" in stop
 
     install = (LAUNCHER / "install-shortcuts.ps1").read_text(encoding="utf-8")
     assert "Desktop" in install and "Programs" in install and "icon.ico" in install

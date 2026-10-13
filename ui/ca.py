@@ -5,7 +5,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-from expenses import ca, tax
+from expenses import ai, auth, ca, tax
 from expenses.money import MoneyParseError, format_inr, parse_amount, to_plain
 from ui.common import esc, get_conn, nice_date, page_header
 
@@ -63,11 +63,12 @@ def money_input(label: str, field: str, default: int = 0, help: str | None = Non
 
 
 # --- inputs ---------------------------------------------------------------------------------------
-tab_tax, tab_items, tab_dates = st.tabs(
+tab_tax, tab_items, tab_dates, tab_ai = st.tabs(
     [
         ":material/calculate: Regime comparison",
         ":material/receipt: Tax-relevant transactions",
         ":material/event: Filing dates & checklist",
+        ":material/forum: Ask your CA",
     ]
 )
 
@@ -268,3 +269,75 @@ with tab_dates:
         st.markdown("**Documents to collect**")
         for i, doc in enumerate(ca.checklist(items, year)):
             st.checkbox(doc, key=f"ca-doc-{year}-{i}")
+
+# --- ask your CA: local AI chat (spec 6.6) --------------------------------------------------------
+with tab_ai:
+    st.markdown(
+        "**Ask your CA** — a free AI model running on this PC answers your questions, "
+        "using the figures on this page. Nothing leaves your computer."
+    )
+    is_web = auth.load_config(tls_enabled=bool(st.get_option("server.sslCertFile"))).demo
+    cfg = ai.config()
+    if is_web:
+        st.info(
+            "The AI chat runs on your own PC, so it's only in the desktop app — not on the web version. "
+            "Everything else on this page works here.",
+            icon=":material/computer:",
+        )
+    elif cfg.url is None:
+        st.info(
+            "To switch it on, run the app with Docker (`docker compose up -d`): it starts the local AI service "
+            "and sets `EXPENSES_AI_URL=http://ollama:11434`. Running without Docker? Install Ollama and set "
+            "`EXPENSES_AI_URL=http://localhost:11434`.",
+            icon=":material/settings:",
+        )
+    else:
+        status = ai.status(cfg.url, cfg.model)
+        if not status.reachable:
+            st.warning(
+                "The local AI service isn't running. Start it with `docker compose up -d` and reload this page.",
+                icon=":material/power_off:",
+            )
+        elif not status.has_model:
+            st.markdown(
+                f"One-time setup: download the free model **{cfg.model}** (about 2.5 GB). It is stored on this PC "
+                "and works offline afterwards."
+            )
+            if st.button("Download model", key="ai_pull", type="primary", icon=":material/download:"):
+                bar = st.progress(0, text="Starting download…")
+                try:
+                    for step in ai.pull(cfg.url, cfg.model):
+                        if step.fraction is not None:
+                            bar.progress(
+                                int(step.fraction * 100), text=f"Downloading… {int(step.fraction * 100)}%"
+                            )
+                    st.rerun()
+                except ai.AIError as exc:
+                    st.error(f"Download failed: {exc}", icon=":material/error:")
+        else:
+            st.caption(f"Model: {cfg.model} · answers can take a little while on a laptop CPU.")
+            history = st.session_state.setdefault("ca_chat", [])
+            for message in history:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+            question = st.chat_input("Ask about your taxes, e.g. “Which regime should I pick, and why?”")
+            if question:
+                context = ai.build_context(
+                    inputs, result, items, ca.filing_calendar(year, today), ca.checklist(items, year)
+                )
+                with st.chat_message("user"):
+                    st.markdown(question)
+                with st.chat_message("assistant"):
+                    try:
+                        answer = st.write_stream(ai.ask(cfg.url, cfg.model, history, question, context))
+                    except ai.AIError as exc:
+                        answer = None
+                        st.error(f"The AI couldn't answer: {exc}", icon=":material/error:")
+                if answer:
+                    history += [
+                        {"role": "user", "content": question},
+                        {"role": "assistant", "content": answer},
+                    ]
+            if history and st.button("Clear chat", key="ai_clear", icon=":material/delete_sweep:"):
+                st.session_state["ca_chat"] = []
+                st.rerun()

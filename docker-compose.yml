@@ -6,13 +6,25 @@ services:
       - "127.0.0.1:8501:8501"
     volumes:
       - expenses-data:/app/data
+    environment:
+      # Ask your CA (spec 6.6): the local model, reachable only on this compose network.
+      EXPENSES_AI_URL: http://ollama:11434
     restart: unless-stopped
     # Optional settings, passed at runtime (never baked into the image). Put them in a
     # git-ignored .env file next to this one and uncomment `env_file`.
     #   EXPENSES_DEMO=1                synthetic demo data in a throwaway database
     #   EXPENSES_PUBLIC=1              you expose the app beyond localhost -> passphrase required
     #   EXPENSES_PASSPHRASE_HASH=...   from `python tools/hash_passphrase.py`
+    #   EXPENSES_AI_MODEL=qwen3:4b-instruct   another Ollama model for the CA chat
     # env_file: .env
+
+  ollama:
+    # Free local AI for the CA chat. Not published to the host, so only the app can reach it.
+    image: ollama/ollama:0.40.3
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
 
 volumes:
   expenses-data:
+  ollama-models:

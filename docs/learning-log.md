@@ -334,3 +334,30 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Compute the new-regime tax on a ₹13,00,000 salary step by step. Where does marginal relief come in?
 2. Why does the old regime have an age-dependent exemption but the new regime doesn't?
 3. Why are tips re-computed by running the calculator again instead of multiplying the extra investment by a tax rate?
+
+## Step 15 — Ask your CA: local AI chat (AC-78 to AC-82) — 2026-10-13
+
+**What was built**
+- `expenses/ai.py`: a small client for a **local** Ollama service — `config()` (off unless `EXPENSES_AI_URL` is local), `status()`, `pull()` (one-time model download with progress), `ask()` (streamed answer), `strip_thinking()`, and `build_context()` which turns the CA calculator's results into a "CA figures" block.
+- `docker-compose.yml`: an `ollama` service (image pinned to 0.40.3, models in the `ollama-models` volume, **no published port**) and `EXPENSES_AI_URL=http://ollama:11434` for the app.
+- "Ask your CA" tab on the Your CA page: setup help, one-time **Download model** button, chat with streamed answers; desktop only (web mode explains why).
+- Default model `qwen3:4b` (2.5 GB, text-only, runs on CPU). Two Part B rules amended and logged ("no downloading models"; network only for fx.py — now also ai.py, local only).
+
+**Why it is designed this way**
+- *Free and private*: the model runs in a container on this PC; the app reaches it over Docker's internal network, and Ollama isn't published to the host or LAN. `is_local_url` refuses any other host, so a wrong setting can't send figures to the internet.
+- *The model explains, the calculator calculates*: small models make arithmetic mistakes. Every number in an answer should come from the "CA figures" block that `tax.py` computed; the system prompt says "use ONLY these figures" and "say which field is missing".
+- *Streaming*: on a laptop CPU a full answer can take tens of seconds; showing words as they arrive feels responsive.
+- *Thinking off*: Qwen3 can "think" before answering, which doubles the wait; `"think": false` turns it off, and any `<think>…</think>` text is filtered even if a tag is split across two chunks.
+- *Testable without a model*: the tests start a fake Ollama HTTP server, so they run offline in seconds.
+
+**What went wrong and was fixed (manual checks in Docker)**
+- *Thinking leaked*: the `qwen3:4b` tag now always "thinks" and ignored `"think": false`; its reasoning appeared in the answer (with no opening `<think>` tag) and one answer took 66 s. Fix: default to `qwen3:4b-instruct` (same size, no thinking), ask Ollama for each model's capabilities and request *separate* thinking (`"think": true`) from thinking models, and strip stray `</think>` tags. After the fix: 26 s, nothing leaked; a small thinking model (`qwen3:0.6b`) also leaked nothing.
+- *The desktop app disappeared*: with no Ubuntu terminal open, WSL stopped Ubuntu seconds after each command, taking both containers down (the launcher test in Step 10 only passed because a terminal was open). Fix: the launcher starts one hidden, tagged `sleep infinity` keep-alive; "Stop Expense Tracker" ends it. After the fix the app stayed up for 60 s+ after the launcher exited.
+- *Memory*: a background check was stopped because the PC ran low on RAM while a 2.5 GB model was loaded; tests now unload the model after use. On a 16 GB laptop, close heavy apps while chatting, or use a smaller model (`EXPENSES_AI_MODEL=llama3.2:3b`).
+
+**Manual check (AC-82)**: in the real desktop app (Docker, CPU only), "Which regime should I choose, and why?" with an ₹18,00,000 salary was answered in ~26 s: new regime, ₹1,50,800 vs ₹3,51,000, saves ₹2,00,200 — every figure identical to the calculator — ending with the disclaimer.
+
+**Quiz questions**
+1. Why does the app give the model the CA's computed figures instead of letting it calculate the tax itself?
+2. Ollama runs in Docker with no published port. How does the app reach it, and why can't another device on your Wi-Fi?
+3. What problem does the hidden `sleep infinity` keep-alive solve, and why did the earlier launcher test not catch it?

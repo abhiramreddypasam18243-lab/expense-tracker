@@ -117,7 +117,7 @@ def test_ac_43_only_fx_uses_network():
         *(ROOT / "tools").glob("*.py"),
     ]
     offenders = [p.name for p in files if NETWORK_IMPORT.search(p.read_text(encoding="utf-8"))]
-    assert offenders == ["fx.py"]
+    assert sorted(offenders) == ["ai.py", "fx.py"]  # AC-43 amended in Step 15: ai.py talks to local Ollama
     fx_source = (ROOT / "expenses" / "fx.py").read_text(encoding="utf-8")
     hosts = set(re.findall(r"https?://([^/\"'\s]+)", fx_source))
     assert hosts == {"api.frankfurter.dev"}

@@ -18,6 +18,20 @@ function Show-Error([string]$Message) {
     exit 1
 }
 
+# WSL stops Ubuntu a few seconds after the last Windows-side wsl.exe exits, even with Docker running inside,
+# which would take the app down. One hidden, tagged "sleep infinity" keeps it up; stop.ps1 ends it.
+$KeepAliveTag = "expense-tracker-keepalive"
+function Start-KeepAlive {
+    $running = Get-CimInstance Win32_Process -Filter "Name='wsl.exe'" |
+        Where-Object { $_.CommandLine -match $KeepAliveTag }
+    if (-not $running) {
+        Start-Process wsl.exe -WindowStyle Hidden `
+            -ArgumentList "-d", $Distro, "--", "bash", "-c", "`"exec -a $KeepAliveTag sleep infinity`""
+    }
+}
+
+Start-KeepAlive
+
 if (-not (Test-Healthy)) {
     # Tell the user something is happening: the first start builds the image and can take a minute.
     $tray = New-Object System.Windows.Forms.NotifyIcon

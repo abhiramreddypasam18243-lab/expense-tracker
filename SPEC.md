@@ -251,6 +251,16 @@ Each item lists its transactions and total; totals **pre-fill** the deduction fi
 
 **6.5.4 Page** "Your CA" (`ui/ca.py`): tax year, age group, income and deduction fields (text inputs parsed with I1, pre-filled), the old-vs-new comparison with a breakdown and tips, the tax-relevant transactions, the filing dates and checklist, and a disclaimer. Works in desktop and web mode.
 
+### 6.6 Ask your CA — local AI chat (Step 15)
+
+A chat tab on the "Your CA" page, answered by a **free model running on this PC** through **Ollama**. Desktop only; in web mode the tab explains that it isn't available.
+
+- **Where it runs**: an `ollama` service in `docker-compose.yml` (image pinned), reachable **only on the internal compose network** (no published port). Models are stored in a named volume. The app finds it through `EXPENSES_AI_URL` (compose sets `http://ollama:11434`); if the variable is unset the tab shows setup instructions.
+- **Local only** (`expenses/ai.py`): the URL must point to `localhost`, a loopback address or the compose service name `ollama`; anything else is refused. Chat content is never logged.
+- **Model**: `EXPENSES_AI_MODEL`, default **`qwen3:4b-instruct`** (2.5 GB, text-only, no "thinking" step, runs on CPU). If it isn't downloaded yet, the tab offers a one-time **Download model** button with a progress bar (Ollama's `/api/pull`).
+- **Grounded answers**: every question is sent with a **context** built from the CA's own results — tax year and section names, both regimes' taxable income and tax, the recommended regime and saving, the deduction figures used, detected tax-relevant items with totals, upcoming deadlines and the checklist. The system prompt tells the model to use **only these figures** for numbers, to say what it needs when information is missing, to answer for India's tax rules, and to remind that it is not professional advice. Calculations are never left to the model.
+- Answers stream in as they are generated. The model's "thinking" never reaches the user: the app asks Ollama for the model's capabilities (`/api/show`); for a thinking model it requests `"think": true` so Ollama returns the thinking in a separate field that the app ignores; for other models it doesn't send the setting. As a safety net, `<think>…</think>` text and stray tags are removed. The chat history lives in the session only.
+
 ## 7. Interfaces
 
 ### 7.1 CLI (`python -m expenses …`, argparse, standard library only)
@@ -321,6 +331,7 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 - `docker-compose.yml`:
   - Publishes **`127.0.0.1:8501:8501` only**.
   - Mounts a named volume (or `./data`) at `/app/data` for the database.
+  - Also runs an `ollama` service (image `ollama/ollama:0.40.3`) with **no published ports** and a named volume `ollama-models`; the app reaches it at `http://ollama:11434` (6.6).
   - Has no secrets in the file.
 - **Passphrase gate**: if `EXPENSES_PUBLIC=1` (meaning the operator intends to publish beyond localhost), the app refuses to start unless `EXPENSES_PASSPHRASE_HASH` is set. Every session must then enter the passphrase, which is checked against a salted PBKDF2 hash using `hmac.compare_digest`. The passphrase is passed in at runtime and never stored in the image.
 - **HTTPS when public**: with `EXPENSES_PUBLIC=1`, the app also refuses to start unless the traffic is encrypted — either Streamlit's own TLS is on (`STREAMLIT_SERVER_SSL_CERT_FILE` and `STREAMLIT_SERVER_SSL_KEY_FILE`, no new dependency) or the operator declares an HTTPS reverse proxy in front with `EXPENSES_TLS_PROXY=1`. Without it, the passphrase would cross the network in plain text.
@@ -331,7 +342,8 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 ### 8.2 Desktop app (Windows launcher)
 
 - `launcher/start.ps1`: if `http://127.0.0.1:8501/_stcore/health` is not already `ok`, run `docker compose up -d --build` in the WSL distribution (default `Ubuntu`) for this project folder, show a "Starting…" notification, and wait up to 3 minutes for health. Then open the app in its **own window** with Microsoft Edge app mode (`msedge --app=http://127.0.0.1:8501`). On failure it shows a message box that says what to check.
-- `launcher/stop.ps1`: `docker compose stop` (data is kept).
+- **Keep-alive**: WSL stops a distribution a few seconds after the last Windows-side `wsl.exe` process exits, even with Docker running inside. `start.ps1` therefore starts one hidden keep-alive process (`sleep infinity`, tagged `expense-tracker-keepalive`) if none is running; it holds Ubuntu — and the containers — up while the app is in use.
+- `launcher/stop.ps1`: `docker compose stop` (data is kept), then ends the keep-alive so WSL can shut down.
 - `launcher/install-shortcuts.ps1`: creates **Expense Tracker** and **Stop Expense Tracker** shortcuts on the Desktop and in the Start menu, using `launcher/icon.ico`.
 - The launcher only ever uses the localhost compose file; it never starts public mode.
 
@@ -454,7 +466,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-40** The Dockerfile runs as non-root and has a HEALTHCHECK. `docker compose up -d --build` becomes healthy (manual check, recorded in the learning log).
 - **AC-41** With `EXPENSES_PUBLIC=1` and no `EXPENSES_PASSPHRASE_HASH`, startup refuses. With the hash set, a wrong passphrase is rejected and the right one is accepted.
 - **AC-42** In web mode a banner is shown and the database is not `data/expenses.db` (amended in Step 13: it is the session's in-memory database).
-- **AC-43** No module except `expenses/fx.py` imports network libraries, and `fx.py`'s only URL is `api.frankfurter.dev` (section 9).
+- **AC-43** No module except `expenses/fx.py` imports network libraries, and `fx.py`'s only URL is `api.frankfurter.dev` (section 9). *(Amended in Step 15: `expenses/ai.py` may too, for the local Ollama service only — AC-82.)*
 
 **Extras (Step 9)**
 
@@ -466,7 +478,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-54** These are not recurring: variable amounts (> ±10 %), irregular gaps (e.g. 10 or 60 days), only 2 payments, credits, and transfers. A group whose last payment is more than 40 days before the newest transaction is reported with `active = False`.
 - **AC-55** On synthetic data, Rent and the monthly Spotify subscription are detected. The Insights page shows "Recurring payments", and `python -m expenses recurring` exits 0 and lists them.
 - **AC-57** Anomalies must also be at least 2× the category median: with 12 × ₹649, 6 × ₹119 and tickets of ₹677–₹2,000 (MAD = ₹28), only ₹2,000 is flagged, even though ₹800 alone scores above 3.5.
-- **AC-58** The launcher scripts exist; `start.ps1` checks health before starting, waits for health with a timeout, opens `msedge --app=http://127.0.0.1:8501`, and never references the public compose file; `install-shortcuts.ps1` creates Desktop and Start-menu shortcuts with `icon.ico`; `icon.ico` is a valid ICO file. Manual check: double-clicking the shortcut opens the app window (recorded in the learning log).
+- **AC-58** The launcher scripts exist; `start.ps1` checks health before starting, waits for health with a timeout, opens `msedge --app=http://127.0.0.1:8501`, and never references the public compose file; `start.ps1` starts the keep-alive at most once and `stop.ps1` ends it; `install-shortcuts.ps1` creates Desktop and Start-menu shortcuts with `icon.ico`; `icon.ico` is a valid ICO file. Manual check: double-clicking the shortcut opens the app window (recorded in the learning log).
 - **AC-59** `demo_app.py` always runs in demo mode: even with `EXPENSES_PUBLIC=1`, no hash and `EXPENSES_DB` set, it shows the web-mode sample-data banner and seeded data, and never creates the `EXPENSES_DB` file.
 - **AC-60** `combine.preview` on 3 files (two accounts, one file repeating rows of another file of the same account, one row already in the database) reports correct per-file totals, new rows, duplicates and rejected rows, and writes nothing (no transactions, no batches).
 - **AC-61** Transfer detection: a ₹20,000 debit in HDFC and a ₹20,000 credit in ICICI 1 day later form a pair; the same amounts 4 days apart, or within one account, do not; with two possible credits the closer date wins and each row is in at most one pair.
@@ -486,6 +498,11 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-75** Tax-relevant transactions are found only inside the tax year (1 Apr – 31 Mar) and grouped as in 6.5.2 (e.g. LIC → life insurance, STAR HEALTH → health insurance, PM CARES → donations, savings interest credit → interest); "HOSPITAL TREATMENT" is **not** health insurance; section labels follow the tax year (80C vs s.123); pre-filled 80C = life insurance + PPF/ELSS/tuition.
 - **AC-76** Filing calendar for 2026-27 on 13 Oct 2026: 15 Jun and 15 Sep are past, 15 Dec 2026 is next, ITR-1/2 due 31 Jul 2027; for 2025-26 on the same day: ITR due 31 Jul 2026 is past and the belated return (31 Dec 2026) is highlighted. The checklist always has the base documents and adds rent receipts only when rent was detected.
 - **AC-77** The "Your CA" page renders with an empty database, with sample data, and in web mode; it shows both regimes, the recommended one, and the disclaimer.
+- **AC-78** `ai.is_local_url` accepts `http://ollama:11434`, `http://localhost:11434`, `http://127.0.0.1:11434` and `http://[::1]:11434`, and refuses public hosts and other IP addresses; `ai.config()` returns no URL (AI off) when `EXPENSES_AI_URL` is unset or not local.
+- **AC-79** The context sent to the model contains the tax year, both regimes' tax and taxable income, the recommended regime and saving, the deduction figures, each detected item with its section and total, and the next deadline — all formatted as Indian rupees.
+- **AC-80** Against a fake Ollama server: `ai.status` reports reachable and whether the model is present (and "unreachable" quickly when nothing listens); `ai.pull` reports download progress; `ai.ask` streams the answer and sends the system prompt with the context and the chat history; for a model with the `thinking` capability it sends `"think": true` and the thinking never appears in the answer, for other models it sends no `think` setting; `<think>…</think>` text and a stray `</think>` are removed; an `{"error": …}` reply raises `AIError`.
+- **AC-81** The "Ask your CA" tab: with no AI URL it shows setup instructions; in web mode it says the chat is desktop-only; with a reachable server but no model it offers **Download model**; with the model it shows a chat box, and a question gets a streamed answer.
+- **AC-82** `docker-compose.yml` has an `ollama` service with the pinned image, no `ports`, the `ollama-models` volume, and the app's `EXPENSES_AI_URL=http://ollama:11434`; only `expenses/fx.py` and `expenses/ai.py` use network libraries (AC-43 amended). Manual check: in Docker, the model downloads and answers a tax question using the CA's figures (recorded in the learning log).
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -506,6 +523,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 12 | Fix: hosted demo `ImportError` (namespace packages shadowed) | AC-66 |
 | 13 | Web mode: real uploads on the hosted site, in memory only | AC-67 – AC-69 |
 | 14 | Virtual CA (offline): tax planning, tax-relevant transactions, filing dates & checklist | AC-70 – AC-77 |
+| 15 | Ask your CA: local AI chat (Ollama in Docker), grounded in the CA's figures | AC-78 – AC-82 |
 
 Rebuild the container after every step.
 
@@ -555,6 +573,7 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-12 | Export's extra columns are named `Original Currency` / `Original Amount`, not `Currency` | `Currency` is an import alias (I3), so re-importing the export would convert the INR amount a second time |
 | 2026-10-12 | **Anomaly 2× rule**: flag only if `M > 3.5` and the amount is at least 2× the category median (owner's choice) | Adding the monthly Spotify payment exposed a MAD weakness: 14 of 29 Entertainment payments were ₹649, so MAD = ₹0.69 and every cinema ticket looked "unusual". The 2× materiality check is simple to explain and keeps the real outliers |
 | 2026-10-13 | **Step 10**: Windows desktop launcher (Docker in WSL + Edge app window) and a public demo on Streamlit Community Cloud (owner's choice: "Desktop app + internet demo") | Real data stays on the PC; only the forced-demo entry point is ever hosted |
+| 2026-10-13 | The launcher keeps WSL running with a hidden `sleep infinity` process (ended by Stop) | Found in the Step 15 check: with no Ubuntu terminal open, WSL stopped Ubuntu seconds after each command, taking the containers down. The earlier launcher test only passed because a terminal happened to be open. Needs no sudo or WSL config change |
 | 2026-10-13 | The launcher uses `127.0.0.1`, not `localhost` | Found in the manual check: Windows PowerShell resolves `localhost` to IPv6 `::1` first, which WSL doesn't forward, so the health check hung |
 | 2026-10-13 | **Step 11 — combined import (I9)**: transfers are detected and the user confirms each pair; all-or-nothing; available in the UI and CLI (owner's choices) | Combining statements double-counts money moved between own accounts unless the pair is recognised |
 | 2026-10-13 | A combined import is stored as **one** import batch (file and account names joined) rather than a new "group" table | One Undo for the whole set without a schema migration |
@@ -563,6 +582,10 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | **Web uploads (owner's choice "1-b")**: the hosted site accepts real statements, processed in a per-visitor **in-memory** database that is never written to disk and vanishes when the visitor leaves. **This amends the Part B rule "Public hosting is for demo mode (synthetic data) only".** | No install needed for others; nothing is stored server-side. Remaining risk, shown to visitors: the files pass through the host's servers while in use |
 | 2026-10-13 | **Virtual CA** (owner's choice: offline CA + local AI chat; scope: tax planning, tax-relevant transactions, filing dates & checklist — not spending health) | Tax rules researched 2026-10-13: Budget 2026 kept slabs and limits; the Income-tax Act 2025 (from 1 Apr 2026) renumbers sections (80C→123, 80CCD(1B)→124, 80D→126, 80E→129, 80G→133, 80GG→134, 80TTA/TTB→153, 87A→156, 24(b)→22, 115BAC→202, HRA→Schedule II); Income-tax Rules 2026 add 4 HRA metros; ITR-3/4 non-audit due 31 Aug; revised return to 31 Mar. Sources: cleartax.in (income-tax-changes-from-april-2026, section-156-income-tax-act-2025, income-tax-slabs), incometaxindia.gov.in (section-156), bajajhousingfinance.in/income-tax-slab, arth-website.vercel.app/income-tax-act-2025, tax2win.in, taxguru.in (HRA 8 cities) |
 | 2026-10-13 | The CA does not compute surcharge (income > ₹50 lakh), capital gains, or business income; it flags them instead | Keeps the calculator small, exact and explainable; out of scope for a salaried user's planning |
+| 2026-10-13 | **Local AI chat via Ollama** (owner's choice "A": free model on this PC). **Amends the Part B rule "no downloading models"**: one model (default `qwen3:4b`, 2.5 GB) may be downloaded into the Ollama volume; the app only ever talks to Ollama on the internal compose network | Free and private: financial context never leaves the PC |
+| 2026-10-13 | Default model `qwen3:4b`; Ollama image pinned to `0.40.3`; CPU-only for now | Checked 2026-10-13 in the Ollama registry: `qwen3:4b` 2.5 GB text-only vs `qwen3.5:4b` / `gemma3:4b` 3.3 GB with an image module we don't need. GPU in Docker needs the NVIDIA container toolkit (a sudo install in WSL), so it is left as an optional upgrade |
+| 2026-10-13 | Default model changed to **`qwen3:4b-instruct`**, and thinking models get `"think": true` | Manual check in Docker: the `qwen3:4b` tag now always "thinks" and ignores `"think": false` — its reasoning leaked into the answer (without an opening `<think>` tag) and the answer took 66 s. The instruct tag (same size) doesn't think; asking thinking models for separate thinking keeps any model's answer clean |
+| 2026-10-13 | The model never does the tax maths; it explains the calculator's results | Small models make arithmetic mistakes; the viva-defensible numbers come from `tax.py` |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---
@@ -596,7 +619,7 @@ I am an undergraduate student building this as a graded project. I will be quizz
 ## Project rules
 
 - Money: parse with Decimal, store as signed integers in minor units, never use float. Format only for display.
-- Privacy: no network calls at runtime, no telemetry, no downloading models. Logs at normal levels must not contain descriptions, merchants or amounts. *(Amended 2026-10-12, decision Q5: one exception, the exchange-rate lookup in rule I8.)*
+- Privacy: no network calls at runtime, no telemetry, no downloading models. Logs at normal levels must not contain descriptions, merchants or amounts. *(Amended 2026-10-12, decision Q5: one exception, the exchange-rate lookup in rule I8. Amended 2026-10-13, Step 15: a local Ollama model may be downloaded once; the app talks to it only inside Docker.)*
 - Data: never create, commit or print real bank data. Use only the synthetic generator in tools/make_synthetic.py. The database and data/ are git-ignored.
 - Structure: core logic in plain Python modules with no UI imports. The CLI and the Streamlit UI are thin layers over the core.
 - Dependencies: pin versions in requirements.txt. Ask before adding a new dependency.
