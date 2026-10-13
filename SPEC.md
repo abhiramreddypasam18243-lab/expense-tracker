@@ -428,6 +428,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-63** Commit imports every file as one batch; ticked pairs land in Transfers with source `manual` and stay there after "Re-run rules"; an unticked pair keeps its rule category; `undo_import(batch)` removes every row of every file.
 - **AC-64** CLI `import-many a.csv="HDFC Savings" b.csv="ICICI Card"`: without `--yes` it prints the preview and pairs and writes nothing (exit 0); with `--yes` it imports and marks pairs; with `--no-transfers` it marks none; a malformed argument (no `=`) or a missing file exits 1.
 - **AC-65** The Import page renders with a multi-file uploader (`accept_multiple_files`); demo mode is unchanged. Manual check: uploading two statements in the browser shows the combined preview and the transfer pairs, and the import works (recorded in the learning log).
+- **AC-66** `expenses/`, `ui/` and `tools/` are regular packages (each has `__init__.py`): with impostor packages of the same names installed later on the import path, the app's own modules are still imported.
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -445,6 +446,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 9 | Extras: merchant acronyms, Cash/ATM rules, HTTPS for public mode, recurring payments, original currency in export, anomaly 2× rule | AC-49 – AC-57 |
 | 10 | Desktop app launcher and internet-demo entry point | AC-58 – AC-59 |
 | 11 | Combined multi-statement import with transfer matching | AC-60 – AC-65 |
+| 12 | Fix: hosted demo `ImportError` (namespace packages shadowed) | AC-66 |
 
 Rebuild the container after every step.
 
@@ -498,6 +500,7 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | **Step 11 — combined import (I9)**: transfers are detected and the user confirms each pair; all-or-nothing; available in the UI and CLI (owner's choices) | Combining statements double-counts money moved between own accounts unless the pair is recognised |
 | 2026-10-13 | A combined import is stored as **one** import batch (file and account names joined) rather than a new "group" table | One Undo for the whole set without a schema migration |
 | 2026-10-13 | Confirmed transfer pairs are stored with `category_source = manual` | The user confirmed them, so rules must not overwrite them |
+| 2026-10-13 | `ui/` and `tools/` get `__init__.py` (regular packages) | The Streamlit Cloud demo failed with `ImportError`: without `__init__.py` they were namespace packages, and Python prefers *any* installed regular package of the same name. Reproduced in a test as `cannot import name 'common' from 'ui'` |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---

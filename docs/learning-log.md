@@ -272,3 +272,18 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why can't the matcher require the two sides of a transfer to have the same date?
 2. A ₹1,000 debit in HDFC could pair with ICICI credits of ₹1,000 on day +1 and day +3. Which one does it pick, and what happens to the other?
 3. Why are confirmed transfer pairs saved with `category_source = 'manual'` instead of `'rule'`?
+
+## Step 12 — Fix: `ImportError` on the hosted demo (AC-66) — 2026-10-13
+
+**What happened**: the Streamlit Cloud demo crashed with `ImportError` (message redacted by Streamlit). The same code worked on this PC and on a clean Linux copy of the GitHub repo.
+
+**Cause**: `ui/` and `tools/` had no `__init__.py`, so they were *namespace packages*. Python's rule: while searching the import path, a **regular** package (one with `__init__.py`) anywhere on the path beats a namespace package, even one that appears earlier. The hosting image has more installed packages than ours; one called `ui` (or `tools`) took over, and `from ui import common` failed. A test reproduces it with a fake installed `ui` package: `ImportError: cannot import name 'common' from 'ui'`.
+
+**Fix**: add `__init__.py` to `ui/` and `tools/` (as `expenses/` already had). Streamlit puts the app folder first on the path, and a regular package found first wins.
+
+**Lesson**: "works on my machine" can still fail in hosting because the *environment* differs. Generic folder names (`ui`, `tools`, `utils`, `test`) are the most likely to clash.
+
+**Quiz questions**
+1. What is the difference between a regular package and a namespace package in Python?
+2. Why did the app work locally but fail on Streamlit Cloud with exactly the same code?
+3. Why is the error `ImportError: cannot import name ...` rather than `ModuleNotFoundError`?
