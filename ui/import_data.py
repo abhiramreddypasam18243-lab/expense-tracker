@@ -7,12 +7,13 @@ from expenses import auth, combine, db
 from expenses.importer import undo_import
 from expenses.money import format_inr
 from ui import demo
-from ui.common import esc, eyebrow, get_conn, nice_date, page_header
+from ui.common import card, esc, eyebrow, get_conn, nice_date, page_header
 
 conn = get_conn()
 page_header(
     "Import",
     "Add one or more bank statements at once. Duplicates are skipped and transfers between your accounts are matched.",
+    eyebrow_text="Data",
 )
 
 accounts = db.list_accounts(conn)
@@ -72,7 +73,7 @@ def show_combined_preview(plan: combine.CombinedPreview) -> set[int]:
 
 # --- web mode, still on sample data (spec 7.2) ------------------------------------------------------------
 if is_demo and demo.is_sample():
-    with st.container(border=True):
+    with card("import-sample"):
         eyebrow("New import")
         st.markdown(
             "You're looking at **sample data**. To import your own statements, click **Use my own statements** "
@@ -95,7 +96,7 @@ else:
             "Nothing is saved on the server. While in use, the files pass through the host's servers.",
             icon=":material/lock:",
         )
-    with st.container(border=True):
+    with card("import-new"):
         eyebrow("New import")
         upload_version = st.session_state.setdefault("upload_version", 0)
         uploads = st.file_uploader(
@@ -155,7 +156,7 @@ else:
 # --- last import ------------------------------------------------------------------------------------------------
 report = st.session_state.get("last_report")
 if isinstance(report, combine.CombinedReport):
-    with st.container(border=True):
+    with card("import-last"):
         eyebrow(f"Last import · batch {report.batch_id}")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Files", len(report.files))
@@ -171,7 +172,7 @@ if isinstance(report, combine.CombinedReport):
             width="stretch",
         )
 elif report:  # single synthetic import (demo mode)
-    with st.container(border=True):
+    with card("import-last-demo"):
         eyebrow(f"Last import · batch {report.batch_id}")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Rows in file", report.rows_total)
@@ -180,8 +181,8 @@ elif report:  # single synthetic import (demo mode)
         m4.metric("Rejected", report.rows_rejected)
 
 # --- history ------------------------------------------------------------------------------------------
-with st.container(border=True):
-    eyebrow("Import history")
+with card("import-history"):
+    eyebrow("Import history", "history")
     batches = db.list_batches(conn)
     if not batches:
         st.caption("No imports yet.")

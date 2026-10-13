@@ -291,6 +291,14 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 - Every page has a clear title, a one-line subtitle, and a friendly **empty state** with a call to action when there is no data, for example "No transactions yet — import a statement".
 - Charts use Altair, which ships with Streamlit, with category colours taken from the Category table. They have no chart junk: no gridline clutter and labelled axes.
 
+**Visual design system** (Step 16 — redesign for a modern, attractive look):
+- **Typography**: *Plus Jakarta Sans* for headings and *Inter* for text, bundled as local `.woff2` files under `static/fonts/` (SIL Open Font License, licence files included) and served by Streamlit's static serving — no font CDN at runtime.
+- **Tokens** (`ui/theme.py`): one set of names (`--bg`, `--surface`, `--border`, `--text`, `--muted`, `--accent`, `--gradient`, `--good`, `--bad`, `--warn`, `--shadow`, …) with separate **light** and **dark** values; the active Streamlit theme (`st.context.theme`) picks which set is injected. Accent: an indigo→violet→pink gradient. Page background: a soft colour glow (mesh gradient) behind content.
+- **Cards**: every panel is a keyed container (`st-key-card-…`) styled as a raised card (16px radius, hairline border, soft layered shadow, gentle fade-in); sidebar, tabs (pill style), buttons (gradient primary), inputs, alerts, tables and chat bubbles are restyled to match.
+- **Components** (`ui/components.py`): hero header (eyebrow, gradient title, subtitle), KPI card (icon chip, value, coloured delta pill, 12-month sparkline), section title, list rows, illustrated empty state. Icons are small inline SVGs.
+- **Dashboard**: hero with the month's story in one sentence (spend, change vs last month, biggest category), four KPI cards (Spend, Income, Net, Transactions) with sparklines, donut with the month's total in the centre and a labelled legend, gradient 12-month bars with the selected month highlighted, budget bars, unusual spending, and recurring payments.
+- **Chart colours** (data-viz method): the 8 main spending categories use a **validated categorical palette** (passes the lightness, chroma, colour-blind and normal-vision checks in light and dark mode; light-mode contrast relief = labelled legend). Food & Dining = orange, Groceries = aqua, Transport = blue, Shopping = magenta, Bills & Utilities = yellow, Rent = violet, Entertainment = red, Health = green; every other category folds into a grey **Other** slice with its parts listed. Charts use the dark-mode steps in dark mode.
+
 **Pages** (sidebar navigation, using `st.navigation`)
 
 1. **Dashboard**:
@@ -503,6 +511,11 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-80** Against a fake Ollama server: `ai.status` reports reachable and whether the model is present (and "unreachable" quickly when nothing listens); `ai.pull` reports download progress; `ai.ask` streams the answer and sends the system prompt with the context and the chat history; for a model with the `thinking` capability it sends `"think": true` and the thinking never appears in the answer, for other models it sends no `think` setting; `<think>…</think>` text and a stray `</think>` are removed; an `{"error": …}` reply raises `AIError`.
 - **AC-81** The "Ask your CA" tab: with no AI URL it shows setup instructions; in web mode it says the chat is desktop-only; with a reachable server but no model it offers **Download model**; with the model it shows a chat box, and a question gets a streamed answer.
 - **AC-82** `docker-compose.yml` has an `ollama` service with the pinned image, no `ports`, the `ollama-models` volume, and the app's `EXPENSES_AI_URL=http://ollama:11434`; only `expenses/fx.py` and `expenses/ai.py` use network libraries (AC-43 amended). Manual check: in Docker, the model downloads and answers a tax question using the CA's figures (recorded in the learning log).
+- **AC-83** Fonts are bundled locally (`static/fonts/*.woff2` + licence) and the theme uses them through static serving; no `http(s)://` URL appears in `app.py`, `ui/` or `.streamlit/config.toml` (offline rule) other than local addresses and the SVG namespace identifier `www.w3.org/2000/svg`, which browsers never fetch.
+- **AC-84** `ui.theme.tokens("light")` and `tokens("dark")` define the same token names with different values, and `ui.theme.css(...)` contains every token; the 8-hue category palette has light and dark steps and anything else maps to the grey "Other".
+- **AC-85** The dashboard shows the month story and four KPI cards (Spend, Income, Net, Transactions) with ₹ values and a sparkline; the donut data groups non-core categories into "Other"; with no data, the illustrated empty state appears.
+- **AC-86** Every page still renders (empty, sample data, web mode) in both light and dark theme; layer separation (AC-36) still holds.
+- **AC-87** Manual check: screenshots of every page in light and dark mode and at phone width are reviewed; the category palette passes the data-viz validator in both modes (recorded in the learning log).
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -524,6 +537,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 13 | Web mode: real uploads on the hosted site, in memory only | AC-67 – AC-69 |
 | 14 | Virtual CA (offline): tax planning, tax-relevant transactions, filing dates & checklist | AC-70 – AC-77 |
 | 15 | Ask your CA: local AI chat (Ollama in Docker), grounded in the CA's figures | AC-78 – AC-82 |
+| 16 | Visual redesign: design tokens, bundled fonts, cards, hero, KPI cards, validated chart palette | AC-83 – AC-87 |
 
 Rebuild the container after every step.
 
@@ -586,6 +600,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | Default model `qwen3:4b`; Ollama image pinned to `0.40.3`; CPU-only for now | Checked 2026-10-13 in the Ollama registry: `qwen3:4b` 2.5 GB text-only vs `qwen3.5:4b` / `gemma3:4b` 3.3 GB with an image module we don't need. GPU in Docker needs the NVIDIA container toolkit (a sudo install in WSL), so it is left as an optional upgrade |
 | 2026-10-13 | Default model changed to **`qwen3:4b-instruct`**, and thinking models get `"think": true` | Manual check in Docker: the `qwen3:4b` tag now always "thinks" and ignores `"think": false` — its reasoning leaked into the answer (without an opening `<think>` tag) and the answer took 66 s. The instruct tag (same size) doesn't think; asking thinking models for separate thinking keeps any model's answer clean |
 | 2026-10-13 | The model never does the tax maths; it explains the calculator's results | Small models make arithmetic mistakes; the viva-defensible numbers come from `tax.py` |
+| 2026-10-13 | **Visual redesign** (owner: "very basic, make it look very good"): fintech style with an indigo→violet gradient accent, Inter + Plus Jakarta Sans bundled locally, raised cards, KPI cards with sparklines | The previous theme was clean but plain; fonts are bundled so the offline rule still holds |
+| 2026-10-13 | Category chart colours switched to a validated 8-hue palette; other categories fold into "Other" | The old Tailwind colours failed the colour check (Transport blue vs Education indigo: ΔE 7.2, below the 15 floor even for full colour vision) |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---

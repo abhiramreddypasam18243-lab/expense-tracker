@@ -91,7 +91,8 @@ def test_ac_42_demo_mode(clean_env, tmp_path):
     db_path = Path(at.session_state["_db_path"])
     assert db_path != tmp_path / "gate.db"
     assert db_path.resolve() != (ROOT / "data" / "expenses.db").resolve()
-    assert [m for m in at.metric if m.label == "Spend"], "demo database should be seeded"
+    kpis = "\n".join(e.proto.body for e in at.get("html"))  # Step 16: KPI cards are styled HTML
+    assert ">Spend<" in kpis and 'class="kpi"' in kpis, "demo database should be seeded"
     assert not (tmp_path / "gate.db").exists()
 
 

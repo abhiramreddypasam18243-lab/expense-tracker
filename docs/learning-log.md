@@ -361,3 +361,36 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why does the app give the model the CA's computed figures instead of letting it calculate the tax itself?
 2. Ollama runs in Docker with no published port. How does the app reach it, and why can't another device on your Wi-Fi?
 3. What problem does the hidden `sleep infinity` keep-alive solve, and why did the earlier launcher test not catch it?
+
+## Step 16 — Visual redesign (AC-83 to AC-87) — 2026-10-13
+
+**What was built**
+- `ui/theme.py`: design tokens (one set of names, light and dark values) and the global stylesheet; the active theme comes from `st.context.theme`.
+- `ui/components.py`: KPI cards with icon chips, delta pills and 6-month sparklines; story banner; section titles; list rows; illustrated empty state — all inline SVG embedded as images.
+- Bundled fonts (Inter, Plus Jakarta Sans; SIL OFL) served from `static/fonts/` with Streamlit's static serving.
+- Every page moved to raised cards (`card()` → keyed container `st-key-card-…`); gradient title, pill tabs, gradient buttons, styled inputs, tables, chat bubbles and sidebar.
+- Dashboard: one-sentence story of the month, KPI row, donut with the total in the centre and a full-width labelled legend, gradient 12-month bars, budgets, unusual spending and recurring payments side by side.
+- Charts: validated 8-hue category palette (light and dark steps), everything else folded into a grey "Other".
+
+**Why it is designed this way**
+- *Tokens, not hard-coded colours*: light and dark mode are the same CSS with different values, so a colour change is one edit.
+- *Keyed containers as cards*: Streamlit's own class names change between versions; `key="card-…"` gives a stable `st-key-card-…` class to style.
+- *SVG as data-URI images*: Streamlit's HTML sanitiser strips inline `<svg>` (icons and sparklines rendered as empty boxes in the first screenshot) but allows `<img src="data:image/svg+xml;base64,…">`.
+- *Colours computed, not eyeballed*: the old palette failed the data-viz validator (Transport blue vs Education indigo ΔE 7.2, below the 15 floor even for normal vision). The new 8 hues pass lightness, chroma, colour-blind (worst ΔE 9.1 light / 8.4 dark) and normal-vision (19.6 / 19.3) checks; a 9th hue would not, so extra categories fold into "Other" and the legend always carries the names.
+- *Fonts bundled*: a font CDN would break the offline rule; two `.woff2` files (≈75 KB) keep the look everywhere, including the web version.
+
+**What the screenshots caught (and fixed)**
+- Empty icon chips and missing sparklines (sanitiser) → data-URI images.
+- Grey boxes behind charts → transparent chart background.
+- Truncated legend names, then cut-off amounts in a two-column legend → one full-width legend under the donut.
+- Colliding bar labels → only the selected and the highest month are labelled.
+- Subtitle squeezed under the title; phone header overlapping the page label → spacing fixes.
+- Bright inactive bars in dark mode → muted dark-mode gradient. Settings showed the old category colours → same palette as the charts.
+
+**One thing that could go wrong**
+- The styling targets some Streamlit internals (`data-testid` names). A future Streamlit upgrade can rename them; the pinned version protects us, and the screenshots should be re-checked after any upgrade.
+
+**Quiz questions**
+1. Why are the icons drawn as `data:image/svg+xml` images instead of inline `<svg>`?
+2. Why does the donut show at most 8 colours plus "Other", instead of one colour per category?
+3. How does the app choose the light or dark set of tokens, and why are the chart colours different in dark mode?

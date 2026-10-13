@@ -56,11 +56,23 @@ def nice_date(iso: str) -> str:
 
 # --- layout pieces --------------------------------------------------------------------------------
 
+_card_counter: dict[str, int] = {}
 
-def page_header(title: str, subtitle: str, months: list[str] | None = None) -> str | None:
-    """Title + subtitle on the left; optional month picker on the right. Returns the chosen month."""
+
+def card(name: str, highlight: bool = False, **kwargs):
+    """A raised card (styled by ui/theme.py through its `st-key-card…` class). Use as a context manager."""
+    prefix = "cardhl" if highlight else "card"
+    return st.container(key=f"{prefix}-{name}", **kwargs)
+
+
+def page_header(
+    title: str, subtitle: str, months: list[str] | None = None, eyebrow_text: str | None = None
+) -> str | None:
+    """Eyebrow + gradient title + subtitle on the left; optional month picker on the right."""
     left, right = st.columns([3, 1], vertical_alignment="bottom")
     with left:
+        if eyebrow_text:
+            st.html(f'<div class="eyebrow-top">{esc(eyebrow_text)}</div>')
         st.title(title)
         st.html(f'<div class="page-sub">{esc(subtitle)}</div>')
     if not months:
@@ -75,16 +87,13 @@ def page_header(title: str, subtitle: str, months: list[str] | None = None) -> s
     return month
 
 
-def empty_state(
-    title: str, body: str, icon: str = "🗂️", link_page: str | None = None, link_label: str | None = None
-) -> None:
-    with st.container(border=True):
-        st.markdown(
-            f'<div class="empty"><div class="icon">{icon}</div><h3>{esc(title)}</h3><p>{esc(body)}</p></div>',
-            unsafe_allow_html=True,
-        )
+def empty_state(title: str, body: str, link_page: str | None = None, link_label: str | None = None) -> None:
+    from ui.components import empty_html  # local import: components imports nothing from here
+
+    with card("empty"):
+        st.html(empty_html(title, body))
         if link_page:
-            _, mid, _ = st.columns([2, 1, 2])
+            _, mid, _ = st.columns([2, 1.2, 2])
             with mid:
                 st.page_link(link_page, label=link_label or "Open", icon=":material/arrow_forward:")
 
@@ -92,12 +101,14 @@ def empty_state(
 def no_transactions_state() -> None:
     empty_state(
         "No transactions yet — import a statement",
-        "Upload a CSV export from your bank and it will be cleaned, de-duplicated and categorised automatically.",
-        icon="📥",
+        "Upload CSV exports from your banks and they will be cleaned, de-duplicated and categorised automatically.",
         link_page="ui/import_data.py",
-        link_label="Import a statement",
+        link_label="Import statements",
     )
 
 
-def eyebrow(text: str) -> None:
-    st.html(f'<div class="eyebrow">{esc(text)}</div>')
+def eyebrow(text: str, icon_name: str = "sparkle", sub: str | None = None) -> None:
+    """Section title inside a card."""
+    from ui.components import section_title
+
+    st.html(section_title(text, icon_name, sub))

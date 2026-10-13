@@ -56,5 +56,5 @@ def test_ac_59_demo_entry_point_is_always_demo(tmp_path, monkeypatch):
     assert not at.exception
     assert not at.error
     assert any("sample data" in i.value for i in at.info)
-    assert [m for m in at.metric if m.label == "Spend"]
+    assert ">Spend<" in "\n".join(e.proto.body for e in at.get("html"))  # seeded: KPI cards shown
     assert not real_db.exists()

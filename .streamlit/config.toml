@@ -3,41 +3,55 @@ gatherUsageStats = false
 
 [server]
 headless = true
+# Serves ./static at app/static/ — used for the bundled fonts (no font CDN at runtime).
+enableStaticServing = true
 
 [client]
 toolbarMode = "minimal"
 
-# --- Theme (spec 7.2): calm neutrals, one indigo accent, rounded cards ---------------
+# --- Theme (spec 7.2 "Visual design system"): indigo accent, bundled fonts, rounded ---------------
 [theme]
-baseRadius = "0.75rem"
-buttonRadius = "0.6rem"
+font = "Inter, sans-serif"
+headingFont = "Plus Jakarta Sans, Inter, sans-serif"
+baseRadius = "0.85rem"
+buttonRadius = "0.75rem"
 showWidgetBorder = true
-showSidebarBorder = true
+showSidebarBorder = false
 metricValueFontSize = "1.7rem"
 metricValueFontWeight = 700
 
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/inter-latin-wght-normal.woff2"
+weight = "100 900"
+
+[[theme.fontFaces]]
+family = "Plus Jakarta Sans"
+url = "app/static/fonts/plus-jakarta-sans-latin-wght-normal.woff2"
+weight = "200 800"
+
 [theme.light]
-primaryColor = "#4F46E5"
-backgroundColor = "#F8FAFC"
-secondaryBackgroundColor = "#EEF2F7"
+primaryColor = "#5B5BF6"
+backgroundColor = "#F4F5FB"
+secondaryBackgroundColor = "#EEF0F8"
 textColor = "#0F172A"
-borderColor = "#E2E8F0"
-dataframeHeaderBackgroundColor = "#F1F5F9"
-greenColor = "#16A34A"
+borderColor = "#E3E6F0"
+dataframeHeaderBackgroundColor = "#F4F5FB"
+greenColor = "#15803D"
 redColor = "#DC2626"
 
 [theme.light.sidebar]
 backgroundColor = "#FFFFFF"
 
 [theme.dark]
-primaryColor = "#818CF8"
-backgroundColor = "#0B1120"
-secondaryBackgroundColor = "#1E293B"
-textColor = "#E2E8F0"
-borderColor = "#1E293B"
-dataframeHeaderBackgroundColor = "#111827"
+primaryColor = "#8B8CFF"
+backgroundColor = "#0A0E1A"
+secondaryBackgroundColor = "#161D31"
+textColor = "#E7EAF3"
+borderColor = "#1E2640"
+dataframeHeaderBackgroundColor = "#121829"
 greenColor = "#4ADE80"
 redColor = "#F87171"
 
 [theme.dark.sidebar]
-backgroundColor = "#0F172A"
+backgroundColor = "#121829"

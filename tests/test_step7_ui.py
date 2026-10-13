@@ -53,6 +53,7 @@ def render(page):
 def all_text(at):
     parts = [m.value for m in at.markdown] + [c.value for c in at.caption] + [h.value for h in at.header]
     parts += [t.value for t in at.title] + [s.value for s in at.subheader] + [i.value for i in at.info]
+    parts += [e.proto.body for e in at.get("html")]  # Step 16: styled HTML components
     return "\n".join(parts)
 
 
@@ -65,9 +66,10 @@ def test_ac_35_pages_render_empty(empty_db, page):
 def test_ac_35_pages_render_seeded(seeded_db, page):
     at = render(page)
     if page == "ui/dashboard.py":
-        labels = [m.label for m in at.metric]
-        assert labels[:4] == ["Spend", "Income", "Net", "Transactions"]
-        assert all("₹" in m.value for m in at.metric[:3])
+        # Step 16: the KPI cards are styled HTML (class "kpi") instead of st.metric.
+        html = "\n".join(e.proto.body for e in at.get("html"))
+        assert all(f">{label}<" in html for label in ("Spend", "Income", "Net", "Transactions"))
+        assert html.count('class="kpi"') == 4 and "₹" in html
 
 
 def test_ac_36_layers_are_separated():

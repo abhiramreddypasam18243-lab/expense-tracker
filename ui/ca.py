@@ -7,11 +7,13 @@ import streamlit as st
 
 from expenses import ai, auth, ca, tax
 from expenses.money import MoneyParseError, format_inr, parse_amount, to_plain
-from ui.common import esc, get_conn, nice_date, page_header
+from ui.common import card, esc, get_conn, nice_date, page_header
 
 conn = get_conn()
 page_header(
-    "Your CA", "Tax planning from your own statements: which regime to pick, what to claim, and when to file."
+    "Your CA",
+    "Tax planning from your own statements: which regime to pick, what to claim, and when to file.",
+    eyebrow_text="Tax planning",
 )
 st.caption(
     "Estimates for planning only — not professional advice. Covers salaried individuals in India for tax years "
@@ -73,7 +75,7 @@ tab_tax, tab_items, tab_dates, tab_ai = st.tabs(
 )
 
 with tab_tax:
-    with st.container(border=True):
+    with card("ca-inputs"):
         st.markdown("**Income** for the whole tax year")
         i1, i2 = st.columns(2)
         salary = money_input(
@@ -147,7 +149,7 @@ with tab_tax:
         (left, result.new, "New regime", f"Default · {names['new_regime']} · few deductions, lower rates"),
         (right, result.old, "Old regime", "Opt in when filing · deductions & HRA allowed"),
     ):
-        with col, st.container(border=True):
+        with col, card(f"ca-{res.regime}", highlight=result.best == res.regime and bool(result.saving_minor)):
             badge = " :green-badge[Recommended]" if result.best == res.regime and result.saving_minor else ""
             st.markdown(f"#### {title}{badge}")
             st.caption(note)
@@ -252,7 +254,7 @@ with tab_items:
 # --- filing dates and checklist -------------------------------------------------------------------
 with tab_dates:
     dates_col, check_col = st.columns([3, 2])
-    with dates_col, st.container(border=True):
+    with dates_col, card("ca-dates"):
         st.markdown(f"**Key dates for tax year {year}**")
         badge = {
             "past": ":gray-badge[Past]",
@@ -265,7 +267,7 @@ with tab_dates:
             flag = " :red-badge[Don't miss]" if d.highlight else ""
             what.markdown(f"{esc(d.title)} {badge[d.status]}{flag}  \n:small[{esc(d.detail)}]")
         st.caption("Due dates can be extended by the government — check incometax.gov.in before filing.")
-    with check_col, st.container(border=True):
+    with check_col, card("ca-docs"):
         st.markdown("**Documents to collect**")
         for i, doc in enumerate(ca.checklist(items, year)):
             st.checkbox(doc, key=f"ca-doc-{year}-{i}")

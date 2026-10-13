@@ -5,6 +5,7 @@ import time
 import streamlit as st
 
 from expenses import auth
+from ui.common import card
 
 UNLOCKED_KEY = "_unlocked"
 
@@ -17,7 +18,7 @@ def require_passphrase(config: auth.Config) -> None:
     _, middle, _ = st.columns([1, 1.3, 1])
     with middle:
         st.html('<div style="height: 12vh"></div>')
-        with st.container(border=True):
+        with card("gate", highlight=True):
             st.image("ui/assets/icon.svg", width=44)
             st.subheader("This tracker is locked")
             st.caption("Enter the passphrase to see the dashboard.")

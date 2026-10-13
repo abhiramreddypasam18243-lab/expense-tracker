@@ -7,13 +7,17 @@ import streamlit as st
 
 from expenses import categorize, db, exporter, insights
 from expenses.money import format_inr
-from ui.common import get_conn, month_label, no_transactions_state, page_header
+from ui.common import card, get_conn, month_label, no_transactions_state, page_header
 
 ALL = "All"
 SOURCE_LABEL = {"rule": "Rule", "manual": "You", "default": "—"}
 
 conn = get_conn()
-page_header("Transactions", "Search, filter and fix categories. Your changes are never overwritten by rules.")
+page_header(
+    "Transactions",
+    "Search, filter and fix categories. Your changes are never overwritten by rules.",
+    eyebrow_text="Ledger",
+)
 
 months = insights.available_months(conn)
 if not months:
@@ -24,7 +28,8 @@ categories = categorize.list_categories(conn)
 category_ids = {c["name"]: c["id"] for c in categories}
 
 # --- filters -------------------------------------------------------------------------------------
-f1, f2, f3, f4 = st.columns([1.2, 1.2, 1.2, 2])
+filter_card = card("filters")
+f1, f2, f3, f4 = filter_card.columns([1.2, 1.2, 1.2, 2])
 default_month = st.session_state.get("month")
 month = f1.selectbox(
     "Month",
@@ -55,7 +60,8 @@ if not rows:
 
 spend = -sum(r["amount_minor"] for r in rows if r["amount_minor"] < 0)
 income = sum(r["amount_minor"] for r in rows if r["amount_minor"] > 0)
-info_col, export_col = st.columns([4, 1], vertical_alignment="center")
+table_card = card("table")
+info_col, export_col = table_card.columns([4, 1], vertical_alignment="center")
 info_col.caption(
     f"**{len(rows)}** transactions · spent **{format_inr(spend)}** · received **{format_inr(income)}**"
 )
@@ -85,7 +91,7 @@ df = pd.DataFrame(
 # A new key after every save (and per filter) so old edits can never apply to different rows.
 version = st.session_state.setdefault("txn_editor_version", 0)
 editor_key = f"txn-{month}-{category}-{account}-{search}-{version}"
-edited = st.data_editor(
+edited = table_card.data_editor(
     df,
     key=editor_key,
     hide_index=True,
@@ -95,7 +101,7 @@ edited = st.data_editor(
     disabled=["id", "Date", "Description", "Merchant", "Set by", "Amount", "Account"],
     column_config={
         "Date": st.column_config.DateColumn(format="D MMM YYYY", width=105),
-        "Description": st.column_config.TextColumn(width=290),
+        "Description": st.column_config.TextColumn(width=250),
         "Merchant": st.column_config.TextColumn(width=120),
         "Category": st.column_config.SelectboxColumn(options=list(category_ids), required=True, width=150),
         "Set by": st.column_config.TextColumn(width=70, help="Rule = automatic, You = your manual choice"),
@@ -112,4 +118,4 @@ if not changed.empty:
     st.toast(f"Updated {len(changed)} categor{'y' if len(changed) == 1 else 'ies'}", icon=":material/check:")
     st.rerun()
 
-st.caption("Tip: click a Category cell to change it. Use Settings → Rules to fix many rows at once.")
+table_card.caption("Tip: click a Category cell to change it. Use Settings → Rules to fix many rows at once.")

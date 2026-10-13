@@ -5,12 +5,23 @@ import streamlit as st
 
 from expenses import categorize, insights
 from expenses.money import MoneyParseError, format_inr, parse_amount
-from ui.common import esc, get_conn, page_header
+from ui import theme
+from ui.common import card, esc, get_conn, page_header
 
 KINDS = ["expense", "income", "transfer"]
 
 conn = get_conn()
-page_header("Settings", "Tune how transactions are categorised and set monthly budgets.")
+mode = theme.current()
+
+
+def dot_color(name: str, stored: str) -> str:
+    """Core categories use the validated chart palette; user-made ones keep their own colour."""
+    return theme.category_color(name, mode) if name in theme.CATEGORY_PALETTE else stored
+
+
+page_header(
+    "Settings", "Tune how transactions are categorised and set monthly budgets.", eyebrow_text="Preferences"
+)
 
 categories = categorize.list_categories(conn)
 by_name = {c["name"]: c for c in categories}
@@ -23,11 +34,11 @@ tab_categories, tab_rules, tab_budgets = st.tabs(
 # --- categories ----------------------------------------------------------------------------------------
 with tab_categories:
     list_col, form_col = st.columns([3, 2])
-    with list_col, st.container(border=True):
+    with list_col, card("categories"):
         for c in categories:
             name_col, kind_col, action_col = st.columns([3, 1.4, 1], vertical_alignment="center")
             name_col.html(
-                f'<div class="legend-row" style="border:none"><span class="dot" style="background:{esc(c["color"])}">'
+                f'<div class="legend-row" style="border:none"><span class="dot" style="background:{esc(dot_color(c["name"], c["color"]))}">'
                 f'</span><span class="name">{esc(c["name"])}</span></div>'
             )
             kind_col.caption(c["kind"].title())
@@ -41,7 +52,7 @@ with tab_categories:
                         categorize.delete_category(conn, c["id"])
                         st.toast(f"Deleted {c['name']}", icon=":material/delete:")
                         st.rerun()
-    with form_col, st.container(border=True):
+    with form_col, card("category-form"):
         st.markdown("**Add a category**")
         with st.form("add_category", clear_on_submit=True, border=False):
             name = st.text_input("Name", placeholder="e.g. Pets")
@@ -131,13 +142,13 @@ with tab_rules:
 with tab_budgets:
     list_col, form_col = st.columns([3, 2])
     budgets = {b["category_id"]: b for b in insights.list_budgets(conn)}
-    with list_col, st.container(border=True):
+    with list_col, card("budgets"):
         if not budgets:
             st.caption("No budgets yet. Add one on the right; progress shows on the Dashboard.")
         for b in budgets.values():
             name_col, amount_col, action_col = st.columns([3, 2, 1], vertical_alignment="center")
             name_col.html(
-                f'<div class="legend-row" style="border:none"><span class="dot" style="background:{esc(b["color"])}">'
+                f'<div class="legend-row" style="border:none"><span class="dot" style="background:{esc(dot_color(b["name"], b["color"]))}">'
                 f'</span><span class="name">{esc(b["name"])}</span></div>'
             )
             amount_col.markdown(f"**{format_inr(b['monthly_limit_minor'])}** / month")
@@ -149,7 +160,7 @@ with tab_budgets:
             ):
                 insights.remove_budget(conn, b["category_id"])
                 st.rerun()
-    with form_col, st.container(border=True):
+    with form_col, card("budget-form"):
         st.markdown("**Set a monthly budget**")
         expense_names = [c["name"] for c in categories if c["kind"] == "expense"]
         with st.form("set_budget", clear_on_submit=True, border=False):
