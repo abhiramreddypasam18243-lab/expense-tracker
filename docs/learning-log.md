@@ -287,3 +287,24 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. What is the difference between a regular package and a namespace package in Python?
 2. Why did the app work locally but fail on Streamlit Cloud with exactly the same code?
 3. Why is the error `ImportError: cannot import name ...` rather than `ModuleNotFoundError`?
+
+## Step 13 — Web mode: real uploads on the hosted site, in memory only (AC-67 to AC-69) — 2026-10-13
+
+**What was built**
+- The hosted site (web mode, `EXPENSES_DEMO=1` via `demo_app.py`) now accepts real statements. Each visitor gets a **private in-memory SQLite database** (`:memory:`) stored in their Streamlit session. It starts with sample data; **Use my own statements** swaps in an empty one; the Import page then works exactly like the desktop (combined upload) and shows an in-memory notice.
+- `db.connect(..., shared_across_threads=True)` for the session database; `ui/demo.py` rewritten (no more temporary files).
+- Part B privacy rule amended (owner's choice "1-b"), recorded in the Decisions Log.
+
+**Why it is designed this way**
+- *`:memory:`, not a temp file*: a temp file could survive a crash or be read by other processes on the host; an in-memory database is never on disk and is freed when the session object is garbage-collected after the visitor leaves.
+- *One connection kept per session* (instead of one per rerun like the desktop): closing an in-memory database deletes it, so web mode must not close it between clicks. `check_same_thread=False` is needed because Streamlit may run a session's reruns on different threads (never at the same time).
+- *Sample first, then "Use my own statements"*: a first-time visitor sees a working dashboard; real and sample data are never mixed.
+- *Honest notice*: "nothing is saved" is true for our code, but the files still pass through the host's servers while in use — the page says so.
+
+**One thing that could go wrong**
+- **Refreshing the page starts a new session** and the data is gone — by design (nothing is stored), but surprising. Seen in the browser check: reloading the URL brought the sample data back. Visitors should export a CSV if they want to keep results.
+
+**Quiz questions**
+1. Why does the web version keep one database connection per session, while the desktop opens and closes one per rerun?
+2. What is the difference between an in-memory SQLite database and a temporary file, from a privacy point of view?
+3. A visitor uploads statements, then refreshes the page. What do they see, and why?

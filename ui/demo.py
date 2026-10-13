@@ -1,8 +1,10 @@
-"""Demo mode (EXPENSES_DEMO=1): every visitor gets a private, throwaway database of synthetic data."""
+"""Web mode (EXPENSES_DEMO=1, the hosted site): one private in-memory database per visitor.
 
-import os
-import tempfile
-from pathlib import Path
+Nothing is written to disk. The database lives in the visitor's session and disappears with it.
+A new session starts with sample (synthetic) data; "Use my own statements" empties it.
+"""
+
+import sqlite3
 
 import streamlit as st
 
@@ -10,15 +12,18 @@ from expenses import categorize, db, insights
 from expenses.importer import import_csv
 from tools.make_synthetic import generate_csv
 
-DEMO_DB_KEY = "_demo_db"
+SESSION_CONN_KEY = "_web_conn"
+SAMPLE_KEY = "_web_sample"
 DEMO_SEED = 42
+# Session keys that belong to the old data and must go when the data is cleared.
+_STALE_KEYS = ("last_report", "month", "plan", "plan_sig")
 
 
 def no_network(currency, on):
-    return None  # synthetic data is INR-only; never fetch rates in demo mode
+    return None  # synthetic data is INR-only; never fetch rates for it
 
 
-def import_synthetic(conn, seed: int, account: str):
+def import_synthetic(conn: sqlite3.Connection, seed: int, account: str):
     return import_csv(
         conn,
         generate_csv(seed, "debit_credit"),
@@ -28,20 +33,36 @@ def import_synthetic(conn, seed: int, account: str):
     )
 
 
-def demo_db_path() -> str:
-    """Path of this session's demo database, created and seeded on first use."""
-    path = st.session_state.get(DEMO_DB_KEY)
-    if path and Path(path).exists():
-        return path
-    fd, path = tempfile.mkstemp(prefix="expenses-demo-", suffix=".db")
-    os.close(fd)
-    conn = db.connect(path)
-    try:
-        categorize.seed_defaults(conn)
+def _new_database(with_sample: bool) -> sqlite3.Connection:
+    conn = db.connect(":memory:", shared_across_threads=True)
+    categorize.seed_defaults(conn)
+    if with_sample:
         import_synthetic(conn, DEMO_SEED, "Demo Savings")
         for name, limit in (("Food & Dining", 12_000_00), ("Groceries", 10_000_00), ("Shopping", 25_000_00)):
             insights.set_budget(conn, categorize.category_id(conn, name), limit)
-    finally:
-        conn.close()
-    st.session_state[DEMO_DB_KEY] = path
-    return path
+    return conn
+
+
+def session_conn() -> sqlite3.Connection:
+    """This visitor's in-memory database, created (with sample data) on first use."""
+    conn = st.session_state.get(SESSION_CONN_KEY)
+    if conn is None:
+        conn = _new_database(with_sample=True)
+        st.session_state[SESSION_CONN_KEY] = conn
+        st.session_state[SAMPLE_KEY] = True
+    return conn
+
+
+def is_sample() -> bool:
+    return bool(st.session_state.get(SAMPLE_KEY, False))
+
+
+def use_own_statements() -> None:
+    """Throw the sample data away: a fresh, empty in-memory database for this visitor."""
+    old = st.session_state.pop(SESSION_CONN_KEY, None)
+    if old is not None:
+        old.close()
+    st.session_state[SESSION_CONN_KEY] = _new_database(with_sample=False)
+    st.session_state[SAMPLE_KEY] = False
+    for key in _STALE_KEYS:
+        st.session_state.pop(key, None)

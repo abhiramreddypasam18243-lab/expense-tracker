@@ -32,26 +32,42 @@ pages = [
 
 with st.sidebar:
     if config.demo:
-        st.caption(f"Demo with synthetic data · v{__version__}")
+        st.caption(f"Web version · nothing is saved on the server · v{__version__}")
     else:
         st.caption(f"Private · your data stays on this machine · v{__version__}")
 
 page = st.navigation(pages)
 
-# 3. Demo mode uses a throwaway per-visitor database; never the real one.
 if config.demo:
-    st.info(
-        "**Demo — synthetic data.** Everything here is generated; changes vanish when you leave.",
-        icon=":material/science:",
-    )
-db_path = demo.demo_db_path() if config.demo else db.default_path()
+    # 3a. Web mode: this visitor's private in-memory database; never a file on the server.
+    conn = demo.session_conn()
+    db_path = ":memory:"
+    if demo.is_sample():
+        text_col, button_col = st.columns([4, 1.3], vertical_alignment="center")
+        text_col.info(
+            "You're viewing **sample data**. "
+            "Your own statements are processed in memory for this visit only.",
+            icon=":material/science:",
+        )
+        if button_col.button("Use my own statements", key="use_own", type="primary", width="stretch"):
+            demo.use_own_statements()
+            st.rerun()
+    else:
+        st.info(
+            "**Private session** — your statements are processed in memory for this visit only. "
+            "Nothing is saved.",
+            icon=":material/lock:",
+        )
+else:
+    # 3b. Desktop: one connection per script run (SQLite is cheap to open); closed after the page.
+    db_path = db.default_path()
+    conn = db.connect(db_path)
+    categorize.seed_defaults(conn)
 
-# One connection per script run (SQLite is cheap to open); closed even if the page reruns or fails.
-conn = db.connect(db_path)
-categorize.seed_defaults(conn)
 st.session_state[CONN_KEY] = conn
 st.session_state[DB_PATH_KEY] = db_path
 try:
     page.run()
 finally:
-    conn.close()
+    if not config.demo:  # the web session's database must live on between reruns
+        conn.close()

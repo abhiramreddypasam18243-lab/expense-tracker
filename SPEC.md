@@ -260,7 +260,11 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 4. **Insights**: the anomaly table with an explanation of each score ("₹8,400 vs typical ₹450 in Food & Dining"), the top merchants, and a **Recurring payments** card (6.4) with the total per month, each payment's typical amount, next expected date and an Active / Stopped badge.
 5. **Settings**: tabs for Categories, Rules (add, edit, delete, reorder by priority, and Re-run rules) and Budgets.
 
-**Demo mode** (`EXPENSES_DEMO=1`): a banner reads "Demo — synthetic data". The database is in-memory or temporary and seeded from `tools/make_synthetic.py`, and Import is limited to synthetic files.
+**Web mode** (`EXPENSES_DEMO=1`, used by the hosted site; amended in Step 13 — it used to be synthetic-only):
+- Every visitor gets a **private, in-memory SQLite database** that lives only in their browser session. Nothing is written to disk, and it disappears when the visitor leaves.
+- A new session starts with **sample data** (from `tools/make_synthetic.py`) and a banner "You're viewing **sample data**" with a **Use my own statements** button that empties the session's database.
+- After that, a banner reads "**Private session** — your statements are processed in memory for this visit only. Nothing is saved." The Import page works as on the desktop (combined upload, I9) and shows the same notice.
+- The AI chat (Step 15) is off in web mode; the offline CA (Step 14) works.
 
 ## 8. Deployment
 
@@ -280,7 +284,7 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 - **HTTPS when public**: with `EXPENSES_PUBLIC=1`, the app also refuses to start unless the traffic is encrypted — either Streamlit's own TLS is on (`STREAMLIT_SERVER_SSL_CERT_FILE` and `STREAMLIT_SERVER_SSL_KEY_FILE`, no new dependency) or the operator declares an HTTPS reverse proxy in front with `EXPENSES_TLS_PROXY=1`. Without it, the passphrase would cross the network in plain text.
 - **`docker-compose.public.yml`** (an override file): publishes on all interfaces, sets `EXPENSES_PUBLIC=1`, requires `EXPENSES_PASSPHRASE_HASH` (compose fails with an error if it is missing), and mounts `./certs` (git- and docker-ignored) for the TLS certificate. Usage: `docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build`. The base `docker-compose.yml` stays localhost-only.
 - The container HEALTHCHECK uses `https` when a certificate is configured.
-- **Public hosting** is allowed only with `EXPENSES_DEMO=1`.
+- **Public hosting** is allowed only in web mode (`EXPENSES_DEMO=1`): per-visitor in-memory databases, nothing stored on the server.
 
 ### 8.2 Desktop app (Windows launcher)
 
@@ -289,9 +293,9 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 - `launcher/install-shortcuts.ps1`: creates **Expense Tracker** and **Stop Expense Tracker** shortcuts on the Desktop and in the Start menu, using `launcher/icon.ico`.
 - The launcher only ever uses the localhost compose file; it never starts public mode.
 
-### 8.3 Internet demo
+### 8.3 Internet web app
 
-- `demo_app.py` is the entry point for public hosting. It **forces** `EXPENSES_DEMO=1` and removes `EXPENSES_PUBLIC`, `EXPENSES_PASSPHRASE_HASH` and `EXPENSES_DB` before running `app.py`, so a hosted copy can never show anything but synthetic data, whatever the host's settings are.
+- `demo_app.py` is the entry point for public hosting. It **forces** web mode (`EXPENSES_DEMO=1`) and removes `EXPENSES_PUBLIC`, `EXPENSES_PASSPHRASE_HASH` and `EXPENSES_DB` before running `app.py`, so a hosted copy can never open a database file on the server, whatever the host's settings are.
 - Host: **Streamlit Community Cloud** (free; deploys `demo_app.py` from a GitHub repository, which may stay private). Publishing needs the owner's GitHub and Streamlit accounts.
 
 ## 9. Privacy and security
@@ -407,7 +411,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-39** `make_synthetic.py --seed 42` is deterministic. Its output has no real-looking account numbers and covers both CSV layouts.
 - **AC-40** The Dockerfile runs as non-root and has a HEALTHCHECK. `docker compose up -d --build` becomes healthy (manual check, recorded in the learning log).
 - **AC-41** With `EXPENSES_PUBLIC=1` and no `EXPENSES_PASSPHRASE_HASH`, startup refuses. With the hash set, a wrong passphrase is rejected and the right one is accepted.
-- **AC-42** In demo mode the banner is shown and the database is not `data/expenses.db`.
+- **AC-42** In web mode a banner is shown and the database is not `data/expenses.db` (amended in Step 13: it is the session's in-memory database).
 - **AC-43** No module except `expenses/fx.py` imports network libraries, and `fx.py`'s only URL is `api.frankfurter.dev` (section 9).
 
 **Extras (Step 9)**
@@ -421,7 +425,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-55** On synthetic data, Rent and the monthly Spotify subscription are detected. The Insights page shows "Recurring payments", and `python -m expenses recurring` exits 0 and lists them.
 - **AC-57** Anomalies must also be at least 2× the category median: with 12 × ₹649, 6 × ₹119 and tickets of ₹677–₹2,000 (MAD = ₹28), only ₹2,000 is flagged, even though ₹800 alone scores above 3.5.
 - **AC-58** The launcher scripts exist; `start.ps1` checks health before starting, waits for health with a timeout, opens `msedge --app=http://127.0.0.1:8501`, and never references the public compose file; `install-shortcuts.ps1` creates Desktop and Start-menu shortcuts with `icon.ico`; `icon.ico` is a valid ICO file. Manual check: double-clicking the shortcut opens the app window (recorded in the learning log).
-- **AC-59** `demo_app.py` always runs in demo mode: even with `EXPENSES_PUBLIC=1`, no hash and `EXPENSES_DB` set, it shows the demo banner and seeded data, and never creates the `EXPENSES_DB` file.
+- **AC-59** `demo_app.py` always runs in demo mode: even with `EXPENSES_PUBLIC=1`, no hash and `EXPENSES_DB` set, it shows the web-mode sample-data banner and seeded data, and never creates the `EXPENSES_DB` file.
 - **AC-60** `combine.preview` on 3 files (two accounts, one file repeating rows of another file of the same account, one row already in the database) reports correct per-file totals, new rows, duplicates and rejected rows, and writes nothing (no transactions, no batches).
 - **AC-61** Transfer detection: a ₹20,000 debit in HDFC and a ₹20,000 credit in ICICI 1 day later form a pair; the same amounts 4 days apart, or within one account, do not; with two possible credits the closer date wins and each row is in at most one pair.
 - **AC-62** All or nothing: a file with no header, or with an empty account name, is a blocking problem in the preview, `commit` raises `CombinedImportError`, and the database is unchanged.
@@ -429,6 +433,9 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-64** CLI `import-many a.csv="HDFC Savings" b.csv="ICICI Card"`: without `--yes` it prints the preview and pairs and writes nothing (exit 0); with `--yes` it imports and marks pairs; with `--no-transfers` it marks none; a malformed argument (no `=`) or a missing file exits 1.
 - **AC-65** The Import page renders with a multi-file uploader (`accept_multiple_files`); demo mode is unchanged. Manual check: uploading two statements in the browser shows the combined preview and the transfer pairs, and the import works (recorded in the learning log).
 - **AC-66** `expenses/`, `ui/` and `tools/` are regular packages (each has `__init__.py`): with impostor packages of the same names installed later on the import path, the app's own modules are still imported.
+- **AC-67** Web mode keeps everything in memory: a new session's database is `:memory:`, it starts with sample data and the "sample data" banner, and no database file is created (not `EXPENSES_DB`, not in the temp folder).
+- **AC-68** "Use my own statements" empties the session's database (no transactions, default categories kept), switches the banner to "Private session", and the Import page then shows the multi-file uploader and the in-memory notice.
+- **AC-69** Two web sessions are isolated: changes in one session are not visible in another.
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -447,6 +454,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 10 | Desktop app launcher and internet-demo entry point | AC-58 – AC-59 |
 | 11 | Combined multi-statement import with transfer matching | AC-60 – AC-65 |
 | 12 | Fix: hosted demo `ImportError` (namespace packages shadowed) | AC-66 |
+| 13 | Web mode: real uploads on the hosted site, in memory only | AC-67 – AC-69 |
 
 Rebuild the container after every step.
 
@@ -501,6 +509,7 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | A combined import is stored as **one** import batch (file and account names joined) rather than a new "group" table | One Undo for the whole set without a schema migration |
 | 2026-10-13 | Confirmed transfer pairs are stored with `category_source = manual` | The user confirmed them, so rules must not overwrite them |
 | 2026-10-13 | `ui/` and `tools/` get `__init__.py` (regular packages) | The Streamlit Cloud demo failed with `ImportError`: without `__init__.py` they were namespace packages, and Python prefers *any* installed regular package of the same name. Reproduced in a test as `cannot import name 'common' from 'ui'` |
+| 2026-10-13 | **Web uploads (owner's choice "1-b")**: the hosted site accepts real statements, processed in a per-visitor **in-memory** database that is never written to disk and vanishes when the visitor leaves. **This amends the Part B rule "Public hosting is for demo mode (synthetic data) only".** | No install needed for others; nothing is stored server-side. Remaining risk, shown to visitors: the files pass through the host's servers while in use |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---
@@ -538,7 +547,7 @@ I am an undergraduate student building this as a graded project. I will be quizz
 - Data: never create, commit or print real bank data. Use only the synthetic generator in tools/make_synthetic.py. The database and data/ are git-ignored.
 - Structure: core logic in plain Python modules with no UI imports. The CLI and the Streamlit UI are thin layers over the core.
 - Dependencies: pin versions in requirements.txt. Ask before adding a new dependency.
-- Deployment: the project must always run as a container (spec section 8.1). Build the walking-skeleton Dockerfile and docker-compose.yml in step 1, keep them working, and rebuild after each step. Never bind to anything but 127.0.0.1 without the passphrase gate. Never put real data or a passphrase in the image or the repo. Public hosting is for demo mode (synthetic data) only.
+- Deployment: the project must always run as a container (spec section 8.1). Build the walking-skeleton Dockerfile and docker-compose.yml in step 1, keep them working, and rebuild after each step. Never bind to anything but 127.0.0.1 without the passphrase gate. Never put real data or a passphrase in the image or the repo. Public hosting is for demo mode (synthetic data) only. *(Amended 2026-10-13, Step 13: the hosted site may process a visitor's own statements in memory for that visit only; nothing is stored.)*
 
 ## Commands
 

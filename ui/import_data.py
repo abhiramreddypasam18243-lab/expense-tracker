@@ -70,13 +70,15 @@ def show_combined_preview(plan: combine.CombinedPreview) -> set[int]:
     return {i for i, use in enumerate(edited["Use"]) if use}
 
 
-# --- demo: synthetic statements only (spec 7.2) ---------------------------------------------------------
-if is_demo:
+# --- web mode, still on sample data (spec 7.2) ------------------------------------------------------------
+if is_demo and demo.is_sample():
     with st.container(border=True):
         eyebrow("New import")
         st.markdown(
-            "Uploads are turned off in the demo. Add another **synthetic** statement instead — "
-            "it uses a different random seed, so you'll see new rows (and how duplicates are handled)."
+            "You're looking at **sample data**. To import your own statements, click **Use my own statements** "
+            "at the top of the page — that clears the sample first.\n\n"
+            "Or add another **synthetic** statement to the sample (a different random seed, so you'll see new "
+            "rows and how duplicates are handled)."
         )
         if st.button(
             "Add a synthetic statement", key="demo_import", type="primary", icon=":material/science:"
@@ -87,6 +89,12 @@ if is_demo:
 
 # --- combined upload (spec I9) --------------------------------------------------------------------------------
 else:
+    if is_demo:
+        st.info(
+            "Your statements are processed **in memory** for this visit only and are gone when you leave. "
+            "Nothing is saved on the server. While in use, the files pass through the host's servers.",
+            icon=":material/lock:",
+        )
     with st.container(border=True):
         eyebrow("New import")
         upload_version = st.session_state.setdefault("upload_version", 0)
@@ -103,7 +111,9 @@ else:
             for up in uploads:
                 name_col, account_col = st.columns([2, 3], vertical_alignment="center")
                 size = f"{up.size / 1024:.1f} KB" if up.size >= 1024 else f"{up.size} bytes"
-                name_col.html(f'<div class="item-title">{esc(up.name)}</div><div class="item-meta">{size}</div>')
+                name_col.html(
+                    f'<div class="item-title">{esc(up.name)}</div><div class="item-meta">{size}</div>'
+                )
                 account = account_col.selectbox(
                     f"Account for {up.name}",
                     options=accounts,

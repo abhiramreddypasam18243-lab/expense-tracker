@@ -87,7 +87,7 @@ def test_ac_42_demo_mode(clean_env, tmp_path):
     clean_env.setenv("EXPENSES_DEMO", "1")
     at = run_app()
     assert not at.exception
-    assert any("Demo — synthetic data" in i.value for i in at.info)
+    assert any("sample data" in i.value for i in at.info)
     db_path = Path(at.session_state["_db_path"])
     assert db_path != tmp_path / "gate.db"
     assert db_path.resolve() != (ROOT / "data" / "expenses.db").resolve()

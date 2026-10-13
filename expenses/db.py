@@ -87,12 +87,16 @@ def default_path() -> str:
     return os.environ.get("EXPENSES_DB") or DEFAULT_DB_PATH
 
 
-def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
-    """Open (and if needed create) the database. ':memory:' is allowed for tests."""
+def connect(path: str | os.PathLike | None = None, shared_across_threads: bool = False) -> sqlite3.Connection:
+    """Open (and if needed create) the database. ':memory:' gives a private in-memory database.
+
+    shared_across_threads: allow use from several threads one after another (a web session's
+    reruns may run on different threads; they never run at the same time).
+    """
     path = str(path or default_path())
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, check_same_thread=not shared_across_threads)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
