@@ -4,6 +4,7 @@ data/
 *.sqlite
 .env
 *.csv
+*.pdf
 certs/
 *.pem
 

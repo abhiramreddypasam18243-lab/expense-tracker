@@ -5,6 +5,7 @@ data
 *.db
 *.sqlite
 *.csv
+*.pdf
 .env
 certs
 *.pem
