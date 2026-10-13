@@ -97,6 +97,13 @@ A file is valid if it has a **date**, a **description**, and either an **amount*
 
 If no valid header is found in the first 20 lines, the import fails with a clear message. Bank exports often have preamble lines, so the header does not have to be on line 1.
 
+**Real-world headings (amended in Step 18).** Banks name their columns in many ways (`Tran Date`, `Transaction Remarks`, `Withdrawal Amount (INR )`, `Withdrawal (Dr)`, `Amount (in Rs.)`), so a heading is first reduced to lower-case letters and digits only (brackets, slashes and spaces dropped) with a trailing currency word (`inr`, `rs`, `in rs`) removed, then classified:
+1. ignored if it is a balance, cheque or reference column, or a serial number;
+2. otherwise matched against a longer list of known names, and failing that by keyword: *withdraw/debit* → debit, *deposit/credit* → credit, *narration/particular/description/remark/detail* → description, *date* or a name ending in *dt* → date, *amount/amt* → amount, *dr/cr*, *type* → a debit/credit **indicator** column;
+3. when several date columns exist, the **transaction/posting date wins over the value date**.
+
+A heading split over **two rows** (e.g. `Withdrawal` / `Amt.`) is matched by joining the two rows cell by cell. With an **amount + indicator** layout, `Dr`/`D`/`Debit` makes the amount a debit and `Cr`/`C`/`Credit` a credit. If nothing matches, the error message lists the **column headings that were seen** (cells containing digits are left out, so no amounts, dates or account numbers appear), so the user can report an unsupported layout safely.
+
 Encoding: UTF-8, with or without a BOM. Blank lines and lines with only commas are skipped silently.
 
 ### I4. Normalisation and merchant
@@ -159,7 +166,7 @@ The single-file import (I7) still works the same way.
 Bank statements often arrive as PDFs (frequently password-protected). A PDF is converted to CSV text and then imported exactly like a CSV (I1–I9).
 
 - **Detection**: by content — a file whose bytes start with `%PDF` is a PDF, whatever its name.
-- **Conversion** (`expenses/pdf_import.py`, library **pdfplumber**): every page's tables are read (ruled-line strategy first, then text-alignment strategy for statements without lines). Cells are trimmed and line breaks inside a cell become spaces. The header row is found with the same alias detection as CSVs (I3); a header **repeated** on later pages is dropped; a row whose date cell is empty is a **continuation** of the previous row's description and is joined to it; blank rows are dropped. The result is CSV text (header + rows) that the user can **download**.
+- **Conversion** (`expenses/pdf_import.py`, library **pdfplumber**): every page's tables are read (ruled-line strategy first, then text-alignment strategy for statements without lines). The header is searched in the first **80** table rows (PDFs often put account details in tables too) and uses the headings rules of I3. Cells are trimmed; the lines of a wrapped narration are joined with a space, **except** when both sides of the break look like parts of one reference (each contains `/` or `-`, or the line ends in one), which banks break mid-word (`UPI/R1/SWIGGY/OK` + `AXIS/order` → `UPI/R1/SWIGGY/OKAXIS/order`). The header row is found with the same alias detection as CSVs (I3); a header **repeated** on later pages is dropped; a row whose date cell is empty is a **continuation** of the previous row's description and is joined to it; blank rows are dropped. The result is CSV text (header + rows) that the user can **download**.
 - **Password**: an encrypted PDF needs its password (often the customer's date of birth or ID, as the bank's email says). It is used once, in memory, and is never stored, logged or shown in messages.
 - **Clear errors** (blocking problems in the combined preview): password needed; wrong password; **scanned** PDF (pages with no selectable text — OCR is out of scope: "download the statement again from net banking, or export it as CSV"); not a real PDF; no transaction table found.
 - **Interfaces**: the Import page accepts `.csv` and `.pdf` together, shows a password field for each PDF and a **Download as CSV** button for each converted PDF; the CLI gets `pdf-to-csv <in.pdf> <out.csv> [--password P]`, and `import-many` accepts PDFs with `--pdf-password P`.
@@ -529,11 +536,16 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-86** Every page still renders (empty, sample data, web mode) in both light and dark theme; layer separation (AC-36) still holds.
 - **AC-87** Manual check: screenshots of every page in light and dark mode and at phone width are reviewed; the category palette passes the data-viz validator in both modes (recorded in the learning log).
 - **AC-88** A synthetic multi-page PDF statement (preamble, ruled table, header repeated on each page) converts to CSV, and importing it gives exactly the same transactions (dates, descriptions, signed amounts) as importing the CSV version of the same statement.
-- **AC-89** Conversion joins descriptions wrapped onto a continuation row (empty date cell), drops repeated headers and blank rows, and turns line breaks inside cells into spaces.
+- **AC-89** Conversion joins descriptions wrapped onto a continuation row (empty date cell), drops repeated headers and blank rows, and joins the lines inside a wrapped cell (with a space, or without one inside a reference such as `ZOMA` + `TO/YBL/x` → `ZOMATO/YBL/x`).
 - **AC-90** A password-protected PDF: no password → "password-protected" error; wrong password → "wrong password" error; right password → converts. The password never appears in any error message or log line.
 - **AC-91** A scanned (image-only) PDF → the "scanned PDF" error; bytes that aren't a PDF → "not a PDF"; a text PDF without a transaction table → "no transaction table" error.
 - **AC-92** `combine.preview` accepts PDFs and CSVs together (PDF detected by content), passes each PDF's password, reports PDF problems as blocking per file, and keeps the converted CSV for download; the CLI `pdf-to-csv` writes the CSV (exit 0; wrong password → exit 1) and `import-many --pdf-password` imports PDFs.
 - **AC-93** The Import page's uploader accepts `.csv` and `.pdf`. Manual check: in the browser, a password-protected PDF and a CSV are uploaded together, the password is entered, the converted CSV downloads, and the import works (recorded in the learning log).
+- **AC-94** Header detection accepts real-world headings: Axis-style `Tran Date | Chq No | Particulars | Debit | Credit | Balance`, ICICI-style `S No. | Value Date | Transaction Date | Cheque Number | Transaction Remarks | Withdrawal Amount (INR ) | Deposit Amount (INR ) | Balance (INR )` (the transaction date is chosen, not the value date), Kotak-style `Withdrawal (Dr) | Deposit (Cr)`, and card-style `Date | Transaction Details | Amount (in Rs.)`; balance and cheque columns are never picked.
+- **AC-95** A heading split over two rows (`Txn | Narration | Withdrawal | Deposit` above `Date | | Amt. | Amt.`) is detected, and data starts after the second row.
+- **AC-96** An amount with a separate indicator column (`Amount | Dr/Cr`) imports `500.00 / Dr` as −50000 and `500.00 / Cr` as +50000; an unknown indicator rejects the row.
+- **AC-97** PDFs in each AC-94 style, a PDF with a two-row heading, and a PDF table drawn **without ruling lines** all convert and import with the right signs and dates.
+- **AC-98** When no header is found, the CSV and PDF error messages list the headings seen (e.g. `Columns we saw: Posting Ref | Memo | Value`) and contain no cell that has a digit.
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -557,6 +569,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 15 | Ask your CA: local AI chat (Ollama in Docker), grounded in the CA's figures | AC-78 – AC-82 |
 | 16 | Visual redesign: design tokens, bundled fonts, cards, hero, KPI cards, validated chart palette | AC-83 – AC-87 |
 | 17 | PDF statements: convert to CSV (password-protected too) and import | AC-88 – AC-93 |
+| 18 | Robust column detection for real bank layouts (CSV and PDF) | AC-94 – AC-98 |
 
 Rebuild the container after every step.
 
@@ -623,6 +636,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | Category chart colours switched to a validated 8-hue palette; other categories fold into "Other" | The old Tailwind colours failed the colour check (Transport blue vs Education indigo: ΔE 7.2, below the 15 floor even for full colour vision) |
 | 2026-10-13 | **PDF statements** (owner's request): new runtime dependency **pdfplumber 0.11.10** (pulls pdfminer.six, pypdfium2, Pillow) and dev-only **fpdf2 2.8.9** for synthetic PDFs — both approved by the owner | pdfplumber reads tables cell by cell (pypdf only gives raw text, which would misplace columns); fpdf2 lets tests use synthetic PDFs, never real statements |
 | 2026-10-13 | Scanned PDFs get a clear message instead of OCR (owner's choice) | OCR needs a ~100 MB engine, is slow, misreads digits in amounts, and can't run on the web version |
+| 2026-10-13 | Wrapped narrations: no space is inserted when both sides of the break are parts of one reference | Found while testing the bank layouts: narrow PDF columns break UPI references mid-word; a space would make the PDF and CSV of the same period disagree, so duplicates would be missed |
+| 2026-10-13 | **Column detection made robust** (owner's real PDF failed with "no transaction table found"): normalised headings, more names + keyword fallback, transaction date over value date, two-row headings, Dr/Cr indicator column, 80-row search in PDFs, error lists the headings seen | The owner's statement can't be shared (privacy rule), so the common Indian layouts were covered and the error now reports headings (never values) for anything still unsupported |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---

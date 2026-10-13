@@ -21,6 +21,7 @@ from expenses.importer import HeaderNotFoundError, find_header
 log = logging.getLogger(__name__)
 
 MIN_TEXT_CHARS = 20  # less selectable text than this on every page = a scan
+HEADER_SEARCH_ROWS = 80  # PDFs often put account details in tables above the transactions
 TEXT_TABLE_SETTINGS = {"vertical_strategy": "text", "horizontal_strategy": "text"}
 
 
@@ -50,9 +51,34 @@ def _is_password_error(exc: BaseException) -> bool:
     return False
 
 
+def _join_wrapped(first: str, second: str) -> str:
+    """Join two lines of a wrapped narration.
+
+    Long reference-style tokens (UPI/..., NEFT-...) are broken mid-word by the PDF's column width,
+    so when both sides of the break look like parts of one reference (or the line ends in '/' or
+    '-') they are joined without a space:
+    'UPI/R1/SWIGGY/OK' + 'AXIS/order 1' -> 'UPI/R1/SWIGGY/OKAXIS/order 1'
+    'UPI/R1/SWIGGY/OKAXIS/lunch' + 'WITH FRIENDS' -> '... lunch WITH FRIENDS'; 'HDFC' + 'BANK' -> 'HDFC BANK'.
+    """
+    first, second = first.strip(), second.strip()
+    if not first or not second:
+        return first or second
+    last, nxt = first.split()[-1], second.split()[0]
+
+    def ref_like(token: str) -> bool:
+        return "/" in token or "-" in token
+
+    mid_token = first.endswith(("/", "-")) or (ref_like(last) and ref_like(nxt))
+    return first + ("" if mid_token else " ") + second
+
+
 def _clean(cell: object) -> str:
-    """Trim and turn line breaks inside a cell into single spaces."""
-    return " ".join(str(cell or "").split())
+    """Trim, collapse spaces, and join the lines of a cell that wrapped onto several lines."""
+    lines = [" ".join(line.split()) for line in str(cell or "").splitlines()]
+    text = ""
+    for line in lines:
+        text = _join_wrapped(text, line)
+    return text
 
 
 def _read_rows(data: bytes, password: str | None) -> tuple[int, int, list[list[str]]]:
@@ -90,15 +116,16 @@ def pdf_to_csv(data: bytes, password: str | None = None) -> PdfConversion:
         )
     rows = [row for row in rows if any(row)]
     try:
-        header_index, cols = find_header(rows)
-    except HeaderNotFoundError:
+        header_index, cols = find_header(rows, limit=HEADER_SEARCH_ROWS)
+    except HeaderNotFoundError as exc:
+        seen = f". Columns we saw: {' | '.join(exc.seen)}" if exc.seen else ""
         raise PdfImportError(
-            "no transaction table found in this PDF (looked for date, description and amount columns)"
+            "no transaction table found in this PDF (looked for date, description and amount columns)" + seen
         ) from None
 
-    header = rows[header_index]
+    header = cols.header or rows[header_index]  # two heading rows arrive already joined
     width = len(header)
-    amount_cols = [i for i in (cols.amount, cols.debit, cols.credit) if i is not None]
+    amount_cols = [i for i in (cols.amount, cols.debit, cols.credit, cols.indicator) if i is not None]
     out = [header]
     for row in rows[header_index + 1 :]:
         row = (row + [""] * width)[:width]
@@ -106,7 +133,7 @@ def pdf_to_csv(data: bytes, password: str | None = None) -> PdfConversion:
             continue  # the header printed again at the top of a later page
         if not row[cols.date] and len(out) > 1 and not any(row[i] for i in amount_cols):
             extra = " ".join(c for c in row if c)  # a narration wrapped onto its own row
-            out[-1][cols.description] = f"{out[-1][cols.description]} {extra}".strip()
+            out[-1][cols.description] = _join_wrapped(out[-1][cols.description], extra)
             continue
         out.append(row)
 

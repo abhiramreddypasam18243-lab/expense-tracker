@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from itertools import zip_longest
 
 from expenses import categorize, db, fx
 from expenses.dates import DateParseError, parse_date
@@ -25,21 +26,93 @@ log = logging.getLogger(__name__)
 
 HEADER_SEARCH_ROWS = 20
 
-# Header aliases, already in "squashed" form (lower case, no spaces / dots / underscores).
-_ALIASES = {
-    "date": {"date", "txndate", "transactiondate", "valuedate", "postingdate"},
-    "description": {"description", "narration", "particulars", "details", "remarks"},
-    "amount": {"amount", "txnamount", "transactionamount"},
-    "debit": {"debit", "withdrawal", "withdrawalamt", "dr"},
-    "credit": {"credit", "deposit", "depositamt", "cr"},
+# Known column names, already reduced by _key() (lower-case letters and digits only).
+_KNOWN = {
+    "date": {
+        "date",
+        "txndate",
+        "transactiondate",
+        "trandate",
+        "valuedate",
+        "valuedt",
+        "postingdate",
+        "postdate",
+        "txnpostingdate",
+        "transactionpostingdate",
+        "bookingdate",
+        "entrydate",
+        "trndate",
+    },
+    "description": {
+        "description",
+        "narration",
+        "particulars",
+        "details",
+        "remarks",
+        "transactiondetails",
+        "transactionremarks",
+        "transactiondescription",
+        "narrative",
+        "txndetails",
+        "txnremarks",
+    },
+    "amount": {"amount", "txnamount", "transactionamount", "amt"},
+    "debit": {
+        "debit",
+        "debits",
+        "withdrawal",
+        "withdrawals",
+        "withdrawalamt",
+        "withdrawalamount",
+        "debitamount",
+        "debitamt",
+        "dr",
+        "withdrawaldr",
+        "dramount",
+    },
+    "credit": {
+        "credit",
+        "credits",
+        "deposit",
+        "deposits",
+        "depositamt",
+        "depositamount",
+        "creditamount",
+        "creditamt",
+        "cr",
+        "depositcr",
+        "cramount",
+    },
+    "indicator": {
+        "drcr",
+        "crdr",
+        "debitcredit",
+        "creditdebit",
+        "dc",
+        "cd",
+        "type",
+        "txntype",
+        "transactiontype",
+    },
     "currency": {"currency", "ccy", "curr", "currencycode"},
 }
+_KNOWN_BY_KEY = {key: field for field, keys in _KNOWN.items() for key in keys}
+_IGNORE_WORDS = ("balance", "cheque", "chq", "ref", "srno", "sno", "slno", "serial", "instrument")
+_DESCRIPTION_WORDS = ("narration", "particular", "description", "remark", "detail", "narrative")
+_DEBIT_FLAGS = {"dr", "d", "db", "debit", "withdrawal"}
+_CREDIT_FLAGS = {"cr", "c", "credit", "deposit"}
 
 FetchRate = Callable[[str, date], "tuple[Decimal, date] | None"]
 
 
 class HeaderNotFoundError(ValueError):
-    """No usable header row in the first HEADER_SEARCH_ROWS rows."""
+    """No usable header row. `seen` lists the headings that were found (never cells with digits)."""
+
+    def __init__(self, message: str, seen: list[str] | None = None) -> None:
+        self.seen = seen or []
+        if self.seen:
+            message += ". Columns we saw: " + " | ".join(self.seen)
+        super().__init__(message)
 
 
 @dataclass
@@ -50,6 +123,8 @@ class ColumnMap:
     debit: int | None = None
     credit: int | None = None
     currency: int | None = None
+    indicator: int | None = None  # a separate "Dr/Cr" column next to a single amount column
+    header: list[str] = field(default_factory=list)  # the heading cells (two rows joined if split)
 
 
 @dataclass
@@ -69,32 +144,107 @@ class _RowRejected(Exception):
 # --- I3 header detection ------------------------------------------------------------
 
 
-def _squash(cell: str) -> str:
-    return re.sub(r"[\s._]+", "", cell).lower()
+def _key(cell: str) -> str:
+    """'Withdrawal Amount (INR )' -> 'withdrawalamount'; 'Amount (in Rs.)' -> 'amount'.
+
+    Currency words are removed only as separate words, so 'Particulars' keeps its 'rs'.
+    """
+    text = re.sub(r"\b(?:in\s+)?(?:inr|rs)\b", " ", cell.lower())
+    return re.sub(r"[^a-z0-9]", "", text)
 
 
-def find_header(rows: list[list[str]]) -> tuple[int, ColumnMap]:
-    """Return (row index, column map) of the first valid header row."""
-    for index, row in enumerate(rows[:HEADER_SEARCH_ROWS]):
-        found: dict[str, int] = {}
-        for col, cell in enumerate(row):
-            key = _squash(cell)
-            for name, aliases in _ALIASES.items():
-                if key in aliases and name not in found:
-                    found[name] = col
-        has_amount = "amount" in found
-        has_pair = "debit" in found and "credit" in found
-        if "date" in found and "description" in found and (has_amount or has_pair):
-            cols = ColumnMap(
-                date=found["date"], description=found["description"], currency=found.get("currency")
-            )
-            if has_amount:  # amount wins over a debit/credit pair
-                cols.amount = found["amount"]
-            else:
-                cols.debit, cols.credit = found["debit"], found["credit"]
+def _classify(key: str) -> str | None:
+    if not key:
+        return None
+    if key in _KNOWN_BY_KEY:
+        return _KNOWN_BY_KEY[key]
+    if any(word in key for word in _IGNORE_WORDS):
+        return None
+    if key.endswith(("drcr", "crdr")):
+        return "indicator"
+    if "withdraw" in key or key.startswith("debit"):
+        return "debit"
+    if "deposit" in key or key.startswith("credit"):
+        return "credit"
+    if any(word in key for word in _DESCRIPTION_WORDS):
+        return "description"
+    if "date" in key or key.endswith("dt"):
+        return "date"
+    if "amount" in key:
+        return "amount"
+    return None
+
+
+def _date_rank(key: str) -> int:
+    """Lower is better: the transaction/posting date beats the value date."""
+    if any(word in key for word in ("txn", "tran", "post", "booking", "entry")):
+        return 0
+    if key == "date":
+        return 1
+    if "value" in key:
+        return 3
+    return 2
+
+
+def _match(cells: list[str]) -> ColumnMap | None:
+    found: dict[str, int] = {}
+    dates: list[tuple[int, int]] = []
+    for col, cell in enumerate(cells):
+        key = _key(cell)
+        kind = _classify(key)
+        if kind == "date":
+            dates.append((_date_rank(key), col))
+        elif kind and kind not in found:
+            found[kind] = col
+    has_amount = "amount" in found
+    has_pair = "debit" in found and "credit" in found
+    if not dates or "description" not in found or not (has_amount or has_pair):
+        return None
+    cols = ColumnMap(
+        date=min(dates)[1],
+        description=found["description"],
+        currency=found.get("currency"),
+        header=list(cells),
+    )
+    if has_amount:  # amount wins over a debit/credit pair
+        cols.amount, cols.indicator = found["amount"], found.get("indicator")
+    else:
+        cols.debit, cols.credit = found["debit"], found["credit"]
+    return cols
+
+
+def _headings_seen(rows: list[list[str]]) -> list[str]:
+    """The most heading-like row's short, digit-free cells (safe to show: no amounts or dates)."""
+    best: list[str] = []
+    for row in rows:
+        cells = [c.strip() for c in row if c.strip() and len(c.strip()) <= 30 and not re.search(r"\d", c)]
+        if len(cells) >= 2 and len(cells) > len(best):
+            best = cells
+    return best
+
+
+def find_header(rows: list[list[str]], limit: int = HEADER_SEARCH_ROWS) -> tuple[int, ColumnMap]:
+    """Return (index of the last heading row, column map). Data starts on the next row.
+
+    Single rows are tried first; then each pair of rows joined cell by cell (a heading split
+    over two lines, e.g. 'Withdrawal' above 'Amt.').
+    """
+    window = rows[:limit]
+    for index, row in enumerate(window):
+        cols = _match(row)
+        if cols:
             return index, cols
+    for index in range(len(window) - 1):
+        merged = [
+            " ".join(part for part in pair if part).strip()
+            for pair in zip_longest(window[index], window[index + 1], fillvalue="")
+        ]
+        cols = _match(merged)
+        if cols:
+            return index + 1, cols
     raise HeaderNotFoundError(
-        f"no header with date, description and amount columns in the first {HEADER_SEARCH_ROWS} lines"
+        f"no header with date, description and amount columns in the first {limit} lines",
+        _headings_seen(window),
     )
 
 
@@ -172,6 +322,19 @@ def _cell(row: list[str], index: int | None) -> str:
     return row[index]
 
 
+def _signed_by_indicator(amount_text: str, flag_text: str) -> int:
+    """Amount plus a separate Dr/Cr column: 'Dr' makes it a debit, 'Cr' a credit."""
+    flag = flag_text.strip().strip(".").lower()
+    value = parse_amount(amount_text)
+    if not flag:
+        return value
+    if flag in _DEBIT_FLAGS:
+        return -abs(value)
+    if flag in _CREDIT_FLAGS:
+        return abs(value)
+    raise MoneyParseError("unknown debit/credit indicator")
+
+
 def _parse_row(row: list[str], cols: ColumnMap, rates: RateLookup) -> dict:
     try:
         txn_date = parse_date(_cell(row, cols.date))
@@ -183,7 +346,9 @@ def _parse_row(row: list[str], cols: ColumnMap, rates: RateLookup) -> dict:
         raise _RowRejected("empty description")
 
     try:
-        if cols.amount is not None:
+        if cols.amount is not None and cols.indicator is not None:
+            orig_amount = _signed_by_indicator(_cell(row, cols.amount), _cell(row, cols.indicator))
+        elif cols.amount is not None:
             orig_amount = parse_amount(_cell(row, cols.amount))
         else:
             orig_amount = parse_debit_credit(_cell(row, cols.debit), _cell(row, cols.credit))

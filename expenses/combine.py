@@ -140,8 +140,9 @@ def preview(
         except UnicodeDecodeError:
             f.problem = "Not UTF-8 text. Export the statement as CSV (UTF-8)."
             continue
-        except HeaderNotFoundError:
-            f.problem = "No header row with date, description and amount columns."
+        except HeaderNotFoundError as exc:
+            seen = f" Columns we saw: {' | '.join(exc.seen)}." if exc.seen else ""
+            f.problem = "No header row with date, description and amount columns." + seen
             continue
 
         f.rows_total, f.errors, f.rejected = prepared.rows_total, prepared.errors, len(prepared.errors)

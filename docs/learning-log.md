@@ -419,3 +419,28 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why convert a PDF to CSV and reuse the importer, instead of writing a separate PDF importer?
 2. A narration wraps onto a second table row with an empty date. How does the converter know it isn't a new transaction?
 3. Why does the app refuse scanned PDFs instead of trying to read them?
+
+## Step 18 — Robust column detection for real bank layouts (AC-94 to AC-98) — 2026-10-13
+
+**Why**: the owner's real (locked) PDF failed with "no transaction table found" although it had transactions. The PDF couldn't be shared (privacy rule), so the common Indian layouts were reproduced synthetically and covered.
+
+**What was built**
+- Headings are reduced to letters/digits with currency words removed (`Withdrawal Amount (INR )` → `withdrawalamount`; `Particulars` keeps its "rs" because only *separate* words are removed), then matched against a longer name list and keyword rules; balance/cheque/reference/serial columns are ignored.
+- The transaction/posting date beats the value date (ICICI prints both).
+- Two-row headings are joined cell by cell (`Withdrawal` over `Amt.`).
+- An `Amount` + `Dr/Cr` (or `Type`) layout sets the sign from the indicator.
+- PDFs: header searched in the first 80 table rows; wrapped narrations joined without a space inside references (`ZOMA`+`TO/YBL/x`).
+- If nothing matches, the error lists **headings only** ("Columns we saw: Posting Ref | Memo | Value") — cells with digits are never shown, so it is safe to share.
+
+**Why it is designed this way**
+- *Classify, don't just look up*: banks invent new headings; keyword rules ("…withdraw…", "…remarks…") cover variants nobody listed, while the ignore list stops "Balance" or "Chq/Ref No" from being mistaken for amounts or descriptions.
+- *Single rows first, then pairs*: joining a preamble line with the real header could also "match", so pairs are only tried when no single row does.
+- *A diagnosable error*: when a layout is still unknown, the message gives exactly what's needed to add it, without exposing any money data.
+
+**One thing that could go wrong**
+- Card statements that print spends as plain positive numbers (no `Dr`) would be read as income; most cards print `Dr`/`Cr`, but a "card mode" may be needed for some issuers. The mid-word wrap rule is a heuristic: a wrap at the end of a reference (e.g. `ORD` + `ER`) still gets a space.
+
+**Quiz questions**
+1. Why must "Particulars" not lose its trailing "rs" when currency words are removed, and how does the regex avoid it?
+2. ICICI statements have both "Value Date" and "Transaction Date". Which one is used and why does it matter for monthly totals?
+3. Why does the error message show only cells without digits?

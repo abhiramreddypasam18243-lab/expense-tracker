@@ -130,14 +130,21 @@ def generate_csv(seed: int, layout: str = "amount", months: int = 6, start: date
 
 
 def table_pdf(
-    header: list[str], rows: list[list[str]], preamble: list[str] = (), password: str | None = None
+    header: list[str] | list[list[str]],
+    rows: list[list[str]],
+    preamble: list[str] = (),
+    password: str | None = None,
+    ruled: bool = True,
 ) -> bytes:
-    """A bank-style PDF: preamble lines, then a ruled table whose header repeats on every page.
+    """A bank-style PDF: preamble lines, then a table whose header repeats on every page.
+
+    header: one row, or a list of rows for a heading split over several lines.
+    ruled=False draws no lines at all (columns are only aligned), like many real statements.
 
     Development/test tool only (needs fpdf2 from requirements-dev.txt).
     """
     from fpdf import FPDF
-    from fpdf.enums import EncryptionMethod, TableHeadingsDisplay
+    from fpdf.enums import EncryptionMethod, TableBordersLayout, TableHeadingsDisplay
 
     pdf = FPDF(format="A4")
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -150,11 +157,19 @@ def table_pdf(
     for line in preamble:
         pdf.cell(0, 6, line, new_x="LMARGIN", new_y="NEXT")
     pdf.ln(3)
-    widths = (24, 92, 26, 26, 22)[: len(header)]
+    header_rows = header if header and isinstance(header[0], list) else [header]
+    columns = len(header_rows[0])
+    widths = (24, 92, 26, 26, 22)[:columns] if columns <= 5 else tuple([190 / columns] * columns)
     with pdf.table(
-        col_widths=widths, line_height=5, repeat_headings=TableHeadingsDisplay.ON_TOP_OF_EVERY_PAGE
+        col_widths=widths,
+        line_height=5,
+        num_heading_rows=len(header_rows),
+        repeat_headings=TableHeadingsDisplay.ON_TOP_OF_EVERY_PAGE,
+        borders_layout=TableBordersLayout.ALL if ruled else TableBordersLayout.NONE,
+        v_align="TOP",  # like real statements: a wrapped narration starts on the date's line
     ) as table:
-        table.row(header)
+        for heading in header_rows:
+            table.row(heading)
         for row in rows:
             table.row(row)
     return bytes(pdf.output())
