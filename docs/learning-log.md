@@ -444,3 +444,28 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why must "Particulars" not lose its trailing "rs" when currency words are removed, and how does the regex avoid it?
 2. ICICI statements have both "Value Date" and "Transaction Date". Which one is used and why does it matter for monthly totals?
 3. Why does the error message show only cells without digits?
+
+## Step 19 — Statements without a heading row (AC-99 to AC-104) — 2026-10-13
+
+**Why**: the owner's bank exports have no heading row, so header matching (I3) has nothing to match.
+
+**What was built** (`expenses/columns.py`, used by the CSV importer and the PDF converter)
+- Data rows = rows of the most common width that contain a date (preamble lines are skipped).
+- Each column is classified by its contents: ≥ 90 % dates → date; ≥ 90 % amounts *with two decimals* → money (so cheque numbers like `000123` aren't money); only `Dr`/`Cr` → indicator; the longest text → description.
+- **Balance proof**: for every money column filled on every row, the other money columns are tried as debit/credit both ways round; the arrangement where *balance change = credit − debit* on ≥ 80 % of rows wins (oldest-first and newest-first statements both work).
+- Without a balance, the left column is assumed to be the debit and the preview says so.
+- Import page: a "Columns guessed" card per file with a green *checked against the running balance* or amber *please check* banner, the first 3 rows, and one role dropdown per column; changes re-run the preview (`StatementInput.column_roles`).
+
+**Manual check (AC-104)**: in the browser, a headerless CSV with the deposit column printed *before* the withdrawal column was guessed correctly (green banner, Column 4 = Credit). A file without a balance showed the amber banner; swapping its columns in the dropdowns flipped the signs, and the import worked.
+
+**Why it is designed this way**
+- Guessing which column is "money out" is the dangerous part: a wrong guess silently turns spending into income. The running balance is arithmetic that the bank already wrote down, so it can *prove* the orientation instead of guessing.
+- Two-decimal rule: a statement's money is always printed with paise; IDs and cheque numbers almost never are.
+
+**One thing that could go wrong**
+- A statement with two different running-balance-like columns (e.g. available and ledger balance) might pick the wrong one; the preview banner and dropdowns are the safety net.
+
+**Quiz questions**
+1. Why must a money column have two decimals in ≥ 80 % of its cells, and what would go wrong without that rule?
+2. How does the running balance tell debit from credit, and how does the check also work for newest-first statements?
+3. Why is the user's column choice part of the preview's re-run signature?

@@ -161,6 +161,23 @@ Import several statements at once — typically one per bank account — as one 
 
 The single-file import (I7) still works the same way.
 
+### I11. Statements without a heading row (Step 19)
+
+Some banks export transactions with no heading row. When no header is found (I3), the columns are **inferred from the content** (`expenses/columns.py`), for CSVs and PDFs alike:
+
+- **Data rows** are the rows with the most common number of cells (preamble lines have fewer); the first one with a date starts the data.
+- **Date**: a column whose filled cells are ≥ 90 % dates (I2); with two (transaction + value date) the left one is used.
+- **Money**: a column whose filled cells are ≥ 90 % amounts (I1) **and** ≥ 80 % written with two decimals — so cheque or reference numbers are never taken for money.
+- **Dr/Cr indicator**: a column whose cells are all `Dr`/`Cr`/`D`/`C`.
+- **Description**: the remaining text column with the longest average text.
+- **Roles of the money columns**:
+  - a money column filled on every row whose change from row to row equals the other amounts (≥ 80 % of rows) is the **running balance**;
+  - two other money columns filled on alternate rows (never both) are **debit + credit** — the balance decides which is which (balance goes down → debit); without a balance the left one is assumed to be the debit and the preview asks the user to check;
+  - otherwise one money column is the **amount** (signed, `Dr`/`Cr` in the cell, or with the indicator column).
+- A heading row with the inferred roles (`Date`, `Description`, `Debit`, `Credit`, `Amount`, `Dr/Cr`, `Balance`) is inserted before the first data row, and the file continues through the normal import (I3–I9); for PDFs, the downloadable CSV includes it.
+- The preview marks such a file "**Columns guessed (no heading row)**", says whether the guess was **checked against the running balance**, shows the first rows, and lets the user **change the role of each column** before importing (`StatementInput.column_roles`). A role choice without a date, a description and an amount (or a debit + credit pair) is a blocking problem.
+- If the columns can't be inferred, the error explains that the file has no heading row and suggests adding one.
+
 ### I10. PDF statements (Step 17)
 
 Bank statements often arrive as PDFs (frequently password-protected). A PDF is converted to CSV text and then imported exactly like a CSV (I1–I9).
@@ -546,6 +563,12 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-96** An amount with a separate indicator column (`Amount | Dr/Cr`) imports `500.00 / Dr` as −50000 and `500.00 / Cr` as +50000; an unknown indicator rejects the row.
 - **AC-97** PDFs in each AC-94 style, a PDF with a two-row heading, and a PDF table drawn **without ruling lines** all convert and import with the right signs and dates.
 - **AC-98** When no header is found, the CSV and PDF error messages list the headings seen (e.g. `Columns we saw: Posting Ref | Memo | Value`) and contain no cell that has a digit.
+- **AC-99** A headerless CSV with a preamble, `date | narration | cheque no | withdrawal | deposit | balance` imports with the right signs; with the deposit column printed **before** the withdrawal column the balance check still gets the signs right; the cheque-number column is not taken for money and `balance_checked` is true.
+- **AC-100** Headerless files with one money column work: signed amounts, `500.00 Dr` / `500.00 Cr` in the cell, and a separate `Dr`/`Cr` column; with two date columns the left one is used.
+- **AC-101** A headerless debit/credit file **without** a balance column assumes left = debit and reports `balance_checked` false so the preview asks the user to check.
+- **AC-102** `column_roles` overrides the guess (e.g. swapping debit and credit flips the signs); roles missing a date, a description or an amount are a blocking problem.
+- **AC-103** A headerless PDF converts (header inserted) and imports; its downloadable CSV starts with the inserted heading row. A file whose columns can't be inferred gives the "no heading row" error.
+- **AC-104** Manual check: in the browser, a headerless statement shows "Columns guessed", the role dropdowns change the result, and the import works (recorded in the learning log).
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -570,6 +593,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 16 | Visual redesign: design tokens, bundled fonts, cards, hero, KPI cards, validated chart palette | AC-83 – AC-87 |
 | 17 | PDF statements: convert to CSV (password-protected too) and import | AC-88 – AC-93 |
 | 18 | Robust column detection for real bank layouts (CSV and PDF) | AC-94 – AC-98 |
+| 19 | Statements without a heading row: inferred columns, balance check, user correction | AC-99 – AC-104 |
 
 Rebuild the container after every step.
 
@@ -636,6 +660,7 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | Category chart colours switched to a validated 8-hue palette; other categories fold into "Other" | The old Tailwind colours failed the colour check (Transport blue vs Education indigo: ΔE 7.2, below the 15 floor even for full colour vision) |
 | 2026-10-13 | **PDF statements** (owner's request): new runtime dependency **pdfplumber 0.11.10** (pulls pdfminer.six, pypdfium2, Pillow) and dev-only **fpdf2 2.8.9** for synthetic PDFs — both approved by the owner | pdfplumber reads tables cell by cell (pypdf only gives raw text, which would misplace columns); fpdf2 lets tests use synthetic PDFs, never real statements |
 | 2026-10-13 | Scanned PDFs get a clear message instead of OCR (owner's choice) | OCR needs a ~100 MB engine, is slow, misreads digits in amounts, and can't run on the web version |
+| 2026-10-13 | **Headerless statements** (the owner's bank exports have no heading row): columns inferred from content, debit/credit orientation proved by the running balance, and the user can correct every column in the preview | Guessing alone could silently flip spends and income; the balance arithmetic makes it checkable, and the dropdowns make it fixable |
 | 2026-10-13 | Wrapped narrations: no space is inserted when both sides of the break are parts of one reference | Found while testing the bank layouts: narrow PDF columns break UPI references mid-word; a space would make the PDF and CSV of the same period disagree, so duplicates would be missed |
 | 2026-10-13 | **Column detection made robust** (owner's real PDF failed with "no transaction table found"): normalised headings, more names + keyword fallback, transaction date over value date, two-row headings, Dr/Cr indicator column, 80-row search in PDFs, error lists the headings seen | The owner's statement can't be shared (privacy rule), so the common Indian layouts were covered and the error now reports headings (never values) for anything still unsupported |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from expenses import categorize, db, fx
+from expenses.columns import ColumnRolesError, Inference
 from expenses.importer import (
     FetchRate,
     HeaderNotFoundError,
@@ -38,6 +39,7 @@ class StatementInput:
     account: str
     source_name: str
     password: str | None = None  # for password-protected PDFs; used once, never stored
+    column_roles: dict[str, int] | None = None  # the user's column choice for a headerless file (I11)
 
 
 @dataclass
@@ -51,6 +53,7 @@ class FilePreview:
     errors: list[tuple[int, str]] = field(default_factory=list)
     problem: str | None = None  # blocking: the whole combined import waits until it's fixed
     converted_csv: str | None = None  # for a PDF: the CSV it was converted to (I10), for download
+    inferred: Inference | None = None  # columns guessed because the file had no heading row (I11)
     rows: list[dict] = field(default_factory=list, repr=False)
 
 
@@ -127,7 +130,8 @@ def preview(
             continue
         if isinstance(item.raw, bytes) and is_pdf(item.raw):
             try:
-                f.converted_csv = pdf_to_csv(item.raw, item.password).csv_text
+                conversion = pdf_to_csv(item.raw, item.password)
+                f.converted_csv, f.inferred = conversion.csv_text, conversion.inferred
             except PdfImportError as exc:
                 f.problem = str(exc)[:1].upper() + str(exc)[1:] + "."
                 continue
@@ -136,14 +140,19 @@ def preview(
                 text = f.converted_csv
             else:
                 text = item.raw.decode("utf-8-sig") if isinstance(item.raw, bytes) else item.raw
-            prepared = prepare_file(conn, text, f.account, item.source_name, rates, rules, fallback)
+            prepared = prepare_file(
+                conn, text, f.account, item.source_name, rates, rules, fallback, item.column_roles
+            )
         except UnicodeDecodeError:
             f.problem = "Not UTF-8 text. Export the statement as CSV (UTF-8)."
             continue
-        except HeaderNotFoundError as exc:
-            seen = f" Columns we saw: {' | '.join(exc.seen)}." if exc.seen else ""
-            f.problem = "No header row with date, description and amount columns." + seen
+        except ColumnRolesError as exc:
+            f.problem = "Column choice: " + str(exc) + "."
             continue
+        except HeaderNotFoundError as exc:
+            f.problem = str(exc)[:1].upper() + str(exc)[1:] + "."
+            continue
+        f.inferred = prepared.inferred or f.inferred
 
         f.rows_total, f.errors, f.rejected = prepared.rows_total, prepared.errors, len(prepared.errors)
         stored = db.existing_fingerprints(conn, [r["fingerprint"] for r in prepared.rows])

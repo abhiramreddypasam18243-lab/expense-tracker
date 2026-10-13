@@ -392,6 +392,7 @@ class PreparedFile:
     rows_total: int = 0
     rows: list[dict] = field(default_factory=list)  # insert-ready rows (they also carry "line")
     errors: list[tuple[int, str]] = field(default_factory=list)
+    inferred: object | None = None  # columns.Inference when the file had no heading row (I11)
 
 
 def base_name(source_name: str) -> str:
@@ -407,17 +408,34 @@ def prepare_file(
     rates: RateLookup,
     rules: list,
     fallback_category: int,
+    column_roles: dict[str, int] | None = None,
 ) -> PreparedFile:
     """Parse, normalise, fingerprint and categorise one statement (I1-I5, I8). No database writes,
-    except caching exchange rates. Raises HeaderNotFoundError if the file has no usable header."""
+    except caching exchange rates. Without a heading row (or with `column_roles` chosen by the user)
+    the columns are inferred from the data (I11). Raises HeaderNotFoundError if that fails too."""
     account = account.strip()
     if not account:
         raise ValueError("account name is required")
     reader = csv.reader(io.StringIO(text.lstrip("\ufeff")))
     rows = [(reader.line_num, row) for row in reader]
-    header_index, cols = find_header([row for _, row in rows])
+    from expenses.columns import infer_columns  # here, not at the top: columns imports this module
 
-    prepared = PreparedFile(account=account, source_name=base_name(source_name))
+    table = [row for _, row in rows]
+    inferred = None
+    if column_roles is not None:
+        inferred = infer_columns(table, column_roles)
+    else:
+        try:
+            header_index, cols = find_header(table)
+        except HeaderNotFoundError as exc:
+            try:
+                inferred = infer_columns(table)
+            except HeaderNotFoundError as inner:
+                raise HeaderNotFoundError(str(inner), exc.seen) from None
+    if inferred is not None:
+        header_index, cols = inferred.start - 1, inferred.column_map()
+
+    prepared = PreparedFile(account=account, source_name=base_name(source_name), inferred=inferred)
     counter = OccurrenceCounter()
     for line, row in rows[header_index + 1 :]:
         if not any(cell.strip() for cell in row):

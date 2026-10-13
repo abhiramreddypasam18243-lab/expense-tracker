@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from expenses import auth, combine, db
+from expenses.columns import ROLE_NAMES
 from expenses.importer import undo_import
 from expenses.money import format_inr
 from expenses.pdf_import import is_pdf
@@ -21,6 +22,71 @@ page_header(
 
 accounts = db.list_accounts(conn)
 is_demo = auth.load_config(tls_enabled=bool(st.get_option("server.sslCertFile"))).demo
+
+
+IGNORE = "Ignore"
+ROLE_BY_LABEL = {label: role for role, label in ROLE_NAMES.items()}
+
+
+def chosen_roles(file_id: str) -> dict[str, int] | None:
+    """The user's column roles for a headerless file (from its dropdowns), or None to keep the guess."""
+    width = st.session_state.get(f"guess-width-{file_id}")
+    if width is None:
+        return None
+    labels = [st.session_state.get(f"role-{file_id}-{c}") for c in range(width)]
+    if None in labels:
+        return None
+    roles: dict[str, int] = {}
+    for col, label in enumerate(labels):
+        if label != IGNORE:
+            roles.setdefault(ROLE_BY_LABEL[label], col)  # a role picked twice: the first column wins
+    return roles
+
+
+def show_column_guess(file_id: str, f: combine.FilePreview) -> None:
+    """Columns guessed for a file without a heading row: sample rows + one role dropdown per column (I11)."""
+    guess = f.inferred or st.session_state.get(f"guess-{file_id}")
+    if guess is None:
+        return
+    st.session_state[f"guess-{file_id}"] = guess  # keep the dropdowns even while the choice is invalid
+    st.session_state[f"guess-width-{file_id}"] = guess.width
+    with card(f"guess-{file_id}"):
+        eyebrow(f"Columns guessed · {f.source_name}", "bars", "This file has no heading row")
+        if f.inferred is not None and f.inferred.balance_checked:
+            st.success(
+                "Checked against the running balance: spends and income have the right signs.",
+                icon=":material/verified:",
+            )
+        else:
+            st.warning(
+                "Couldn't check these against a running balance. Look at the first rows below and fix any "
+                "column that's wrong — especially which one is money **out** (Debit) and money **in** (Credit).",
+                icon=":material/help:",
+            )
+        role_of = {col: role for role, col in guess.roles.items()}
+        options = [IGNORE, *ROLE_NAMES.values()]
+        picks = st.columns(guess.width)
+        for col, slot in enumerate(picks):
+            current = ROLE_NAMES[role_of[col]] if col in role_of else IGNORE
+            slot.selectbox(
+                f"Column {col + 1}",
+                options,
+                index=options.index(current),
+                key=f"role-{file_id}-{col}",
+            )
+        labels = [st.session_state.get(f"role-{file_id}-{c}", IGNORE) for c in range(guess.width)]
+        repeated = sorted({x for x in labels if x != IGNORE and labels.count(x) > 1})
+        if repeated:
+            st.caption(f"Used more than once (the first column counts): {', '.join(repeated)}")
+        sample = (f.inferred or guess).sample
+        st.dataframe(
+            pd.DataFrame(
+                [(row + [""] * guess.width)[: guess.width] for row in sample],
+                columns=[f"Column {c + 1}" for c in range(guess.width)],
+            ),
+            hide_index=True,
+            width="stretch",
+        )
 
 
 def show_combined_preview(plan: combine.CombinedPreview) -> set[int]:
@@ -145,12 +211,21 @@ else:
                         )
                         or None
                     )
-                inputs.append(combine.StatementInput(data, account or "", up.name, password=password))
+                inputs.append(
+                    combine.StatementInput(
+                        data, account or "", up.name, password=password, column_roles=chosen_roles(up.file_id)
+                    )
+                )
 
             # Re-parse only when the files or accounts change (not on every click).
             # (The password is part of the key as a hash only, so a new password re-runs the conversion.)
             signature = tuple(
-                (up.file_id, i.account, hashlib.sha256((i.password or "").encode()).hexdigest())
+                (
+                    up.file_id,
+                    i.account,
+                    hashlib.sha256((i.password or "").encode()).hexdigest(),
+                    tuple(sorted((i.column_roles or {}).items())),
+                )
                 for up, i in zip(uploads, inputs, strict=True)
             )
             if st.session_state.get("plan_sig") != signature:
@@ -161,6 +236,8 @@ else:
             st.divider()
             eyebrow("Preview — nothing is saved yet")
             confirmed = show_combined_preview(plan)
+            for up, f in zip(uploads, plan.files, strict=True):
+                show_column_guess(up.file_id, f)
             for f in plan.files:  # every converted PDF can be downloaded as CSV (I10)
                 if f.converted_csv is not None:
                     st.download_button(

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import pdfplumber
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 
+from expenses.columns import Inference, infer_columns
 from expenses.importer import HeaderNotFoundError, find_header
 
 log = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class PdfConversion:
     csv_text: str
     pages: int
     rows: int
+    inferred: Inference | None = None  # set when the table had no heading row (I11)
 
 
 def is_pdf(data: bytes) -> bool:
@@ -115,13 +117,19 @@ def pdf_to_csv(data: bytes, password: str | None = None) -> PdfConversion:
             "net banking, or export it as CSV"
         )
     rows = [row for row in rows if any(row)]
+    inferred = None
     try:
         header_index, cols = find_header(rows, limit=HEADER_SEARCH_ROWS)
     except HeaderNotFoundError as exc:
-        seen = f". Columns we saw: {' | '.join(exc.seen)}" if exc.seen else ""
-        raise PdfImportError(
-            "no transaction table found in this PDF (looked for date, description and amount columns)" + seen
-        ) from None
+        try:
+            inferred = infer_columns(rows)  # a table without a heading row (I11)
+        except HeaderNotFoundError:
+            seen = f". Columns we saw: {' | '.join(exc.seen)}" if exc.seen else ""
+            raise PdfImportError(
+                "no transaction table found in this PDF: no heading row with date, description and amount "
+                "columns, and the columns couldn't be worked out from the data" + seen
+            ) from None
+        header_index, cols = inferred.start - 1, inferred.column_map()
 
     header = cols.header or rows[header_index]  # two heading rows arrive already joined
     width = len(header)
@@ -140,4 +148,4 @@ def pdf_to_csv(data: bytes, password: str | None = None) -> PdfConversion:
     buf = io.StringIO()
     csv.writer(buf, lineterminator="\n").writerows(out)
     log.info("pdf converted pages=%d rows=%d", pages, len(out) - 1)  # counts only (privacy rule)
-    return PdfConversion(buf.getvalue(), pages, len(out) - 1)
+    return PdfConversion(buf.getvalue(), pages, len(out) - 1, inferred)
