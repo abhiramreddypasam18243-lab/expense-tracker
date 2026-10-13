@@ -27,6 +27,7 @@ pages = [
     ),
     st.Page("ui/import_data.py", title="Import", url_path="import", icon=":material/upload_file:"),
     st.Page("ui/insights_page.py", title="Insights", url_path="insights", icon=":material/insights:"),
+    st.Page("ui/ca.py", title="Your CA", url_path="ca", icon=":material/account_balance:"),
     st.Page("ui/settings.py", title="Settings", url_path="settings", icon=":material/tune:"),
 ]
 

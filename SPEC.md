@@ -209,6 +209,48 @@ Spot subscriptions and fixed monthly bills.
 - **Output** per group: name, category, typical (median) amount, number of payments, last date, typical interval (median gap, days), **next expected date** (last date + median gap), and **active** = the last payment is no more than 40 days before the newest transaction in the database.
 - Sorted by typical amount, largest first.
 
+### 6.5 Virtual CA (offline) — Step 14
+
+An offline "Chartered Accountant" for **individual taxpayers in India**: income-tax planning, tax-relevant transactions, and filing dates with a checklist. It is an **estimate for planning, not professional advice**, and the page says so.
+
+**Tax years** supported: **2025-26** (Income-tax Act, 1961: sections 80C, 87A, …) and **2026-27** (Income-tax Act, 2025, in force from 1 April 2026: same rates and limits, new section numbers). Sources and dates are listed in the Decisions Log.
+
+**6.5.1 Tax computation** (`expenses/tax.py`; integers in paise; Decimal only for percentages):
+
+| | New regime (default; old 115BAC → new s.202) | Old regime |
+|---|---|---|
+| Slabs | 0–4L nil · 4–8L 5% · 8–12L 10% · 12–16L 15% · 16–20L 20% · 20–24L 25% · >24L 30% | 0–2.5L nil (60–79: 3L; 80+: 5L) · to 5L 5% · 5–10L 20% · >10L 30% |
+| Standard deduction (salary) | ₹75,000 | ₹50,000 |
+| Rebate (87A → s.156) | taxable income ≤ ₹12L: up to ₹60,000, with **marginal relief** (tax after rebate ≤ income above ₹12L) | taxable income ≤ ₹5L: up to ₹12,500 |
+| Deductions | none of the below | 80C/s.123 ≤ ₹1.5L · 80CCD(1B)/s.124 ≤ ₹50,000 · 80D/s.126: self ≤ ₹25,000 (₹50,000 if 60+) + parents ≤ ₹25,000 (₹50,000 if 60+) · 24(b)/s.22 home-loan interest ≤ ₹2L · 80E/s.129 no limit · 80G/s.133 (user enters the eligible amount) · 80TTA ≤ ₹10,000 / 80TTB (60+) ≤ ₹50,000 (s.153) · HRA exemption (below) |
+| Cess | 4% of tax after rebate | 4% |
+
+- Gross income = salary + other income (interest etc.). Taxable income and final tax are each **rounded to the nearest ₹10**.
+- **HRA exemption** (old regime, Schedule II / s.10(13A)) = least of: HRA received; rent paid − 10% of basic salary; 50% of basic (metro) or 40% (others). Metros: Delhi, Mumbai, Kolkata, Chennai; from **2026-27** also Bengaluru, Hyderabad, Pune, Ahmedabad.
+- **Surcharge** (taxable income > ₹50 lakh) is **not computed**; the result is flagged "estimate excludes surcharge".
+- `compare(inputs)` returns both regimes, the cheaper one and the saving. **Tips** are only shown when they lower the best tax, e.g. "Investing ₹X more under s.123 (80C) would make the old regime cheaper by ₹Y" — computed by re-running the calculation, never guessed.
+
+**6.5.2 Tax-relevant transactions** (`expenses/ca.py`): within the tax year (1 April – 31 March), debits/credits are matched case-insensitively against a fixed table of keywords:
+
+| Item | Section (2025-26 / 2026-27) | Examples of keywords |
+|---|---|---|
+| Life insurance premium | 80C / s.123 | LIC, LIFE INSURANCE, HDFC LIFE, SBI LIFE, ICICI PRU, MAX LIFE, TATA AIA |
+| PPF / ELSS / tuition fees | 80C / s.123 | PPF, ELSS, TUITION, SCHOOL FEE |
+| NPS (own contribution) | 80CCD(1B) / s.124 | NPS, PRAN |
+| Health insurance | 80D / s.126 | HEALTH INSURANCE, MEDICLAIM, STAR HEALTH, NIVA BUPA, CARE HEALTH, ICICI LOMBARD |
+| Home loan | 24(b) / s.22 (interest), 80C (principal) | HOME LOAN, HOUSING LOAN, HSG LOAN |
+| Education loan | 80E / s.129 | EDUCATION LOAN, EDU LOAN |
+| Donations | 80G / s.133 | DONATION, PM CARES, CRY, GIVEINDIA |
+| Rent paid | HRA / 80GG (s.134) | rows in the Rent category |
+| Savings interest received (credit) | income + 80TTA/TTB (s.153) | INT PD, INTEREST CREDIT, SB INT, INT.PD |
+| Salary received (credit) | — (shows take-home salary) | rows in the Salary category |
+
+Each item lists its transactions and total; totals **pre-fill** the deduction fields, which the user can change. Detection is a hint: the checklist asks for the proof documents.
+
+**6.5.3 Filing dates and checklist**: for the chosen tax year and today's date: advance tax 15 Jun (15%), 15 Sep (45%), 15 Dec (75%), 15 Mar (100%) of the tax year (only if tax due after TDS ≥ ₹10,000); ITR-1/ITR-2 due **31 July** after the tax year; ITR-3/ITR-4 (non-audit) **31 August**; belated return **31 December**; revised return **31 March** (12 months). Each date is marked *done/past*, *next* or *upcoming*; if the ITR date has passed, the belated-return date is highlighted. The document checklist always has Form 16, AIS/TIS, Form 26AS, bank interest certificates and PAN–Aadhaar link, and adds rent receipts (+ landlord PAN if rent > ₹1 lakh a year), premium receipts, home-loan interest certificate, donation receipts, NPS/PPF/ELSS statements when the matching items were detected.
+
+**6.5.4 Page** "Your CA" (`ui/ca.py`): tax year, age group, income and deduction fields (text inputs parsed with I1, pre-filled), the old-vs-new comparison with a breakdown and tips, the tax-relevant transactions, the filing dates and checklist, and a disclaimer. Works in desktop and web mode.
+
 ## 7. Interfaces
 
 ### 7.1 CLI (`python -m expenses …`, argparse, standard library only)
@@ -436,6 +478,14 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-67** Web mode keeps everything in memory: a new session's database is `:memory:`, it starts with sample data and the "sample data" banner, and no database file is created (not `EXPENSES_DB`, not in the temp folder).
 - **AC-68** "Use my own statements" empties the session's database (no transactions, default categories kept), switches the banner to "Private session", and the Import page then shows the multi-file uploader and the in-memory notice.
 - **AC-69** Two web sessions are isolated: changes in one session are not visible in another.
+- **AC-70** New regime: salary ₹12,75,000 → tax ₹0; salary ₹13,00,000 → taxable ₹12,25,000, slab tax ₹63,750, marginal relief limits it to ₹25,000, + 4% cess = **₹26,000**; salary ₹20,00,000 → taxable ₹19,25,000, tax ₹1,85,000 + cess = **₹1,92,400**.
+- **AC-71** Old regime: salary ₹10,00,000 with 80C ₹1,50,000 and 80D ₹25,000 → taxable ₹7,75,000 → ₹67,500 + cess = **₹70,200**; 80C of ₹2,00,000 is capped at ₹1,50,000; age 60–79 with taxable ₹5,00,000 → ₹0 (rebate); the 3L/5L exemptions apply by age group.
+- **AC-72** `compare` picks the cheaper regime and the saving; a tip appears only if it lowers the best tax, and its figures equal a re-computation; old-only deductions never change the new-regime tax.
+- **AC-73** Taxable income and tax are rounded to the nearest ₹10, all money values are `int`; taxable income above ₹50 lakh sets `surcharge_excluded`.
+- **AC-74** HRA exemption = least of the three amounts; Bengaluru uses 40% in 2025-26 and 50% in 2026-27; Delhi uses 50% in both; no rent → 0.
+- **AC-75** Tax-relevant transactions are found only inside the tax year (1 Apr – 31 Mar) and grouped as in 6.5.2 (e.g. LIC → life insurance, STAR HEALTH → health insurance, PM CARES → donations, savings interest credit → interest); "HOSPITAL TREATMENT" is **not** health insurance; section labels follow the tax year (80C vs s.123); pre-filled 80C = life insurance + PPF/ELSS/tuition.
+- **AC-76** Filing calendar for 2026-27 on 13 Oct 2026: 15 Jun and 15 Sep are past, 15 Dec 2026 is next, ITR-1/2 due 31 Jul 2027; for 2025-26 on the same day: ITR due 31 Jul 2026 is past and the belated return (31 Dec 2026) is highlighted. The checklist always has the base documents and adds rent receipts only when rent was detected.
+- **AC-77** The "Your CA" page renders with an empty database, with sample data, and in web mode; it shows both regimes, the recommended one, and the disclaimer.
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -455,12 +505,13 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 11 | Combined multi-statement import with transfer matching | AC-60 – AC-65 |
 | 12 | Fix: hosted demo `ImportError` (namespace packages shadowed) | AC-66 |
 | 13 | Web mode: real uploads on the hosted site, in memory only | AC-67 – AC-69 |
+| 14 | Virtual CA (offline): tax planning, tax-relevant transactions, filing dates & checklist | AC-70 – AC-77 |
 
 Rebuild the container after every step.
 
 ## 14. Out of scope
 
-Multi-user support and login (other than the passphrase gate), bank APIs, PDF or XLS import, ML or LLM categorisation, multi-currency reporting or offline rate tables, non-monthly recurring payments (weekly, yearly), split transactions, attachments and receipts, mobile app, and cloud sync.
+Multi-user support and login (other than the passphrase gate), bank APIs, PDF or XLS import, ML or LLM categorisation, multi-currency reporting or offline rate tables, non-monthly recurring payments (weekly, yearly), tax on capital gains / business income / surcharge, actual ITR filing, split transactions, attachments and receipts, mobile app, and cloud sync.
 
 ## 15. Open questions
 
@@ -510,6 +561,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | Confirmed transfer pairs are stored with `category_source = manual` | The user confirmed them, so rules must not overwrite them |
 | 2026-10-13 | `ui/` and `tools/` get `__init__.py` (regular packages) | The Streamlit Cloud demo failed with `ImportError`: without `__init__.py` they were namespace packages, and Python prefers *any* installed regular package of the same name. Reproduced in a test as `cannot import name 'common' from 'ui'` |
 | 2026-10-13 | **Web uploads (owner's choice "1-b")**: the hosted site accepts real statements, processed in a per-visitor **in-memory** database that is never written to disk and vanishes when the visitor leaves. **This amends the Part B rule "Public hosting is for demo mode (synthetic data) only".** | No install needed for others; nothing is stored server-side. Remaining risk, shown to visitors: the files pass through the host's servers while in use |
+| 2026-10-13 | **Virtual CA** (owner's choice: offline CA + local AI chat; scope: tax planning, tax-relevant transactions, filing dates & checklist — not spending health) | Tax rules researched 2026-10-13: Budget 2026 kept slabs and limits; the Income-tax Act 2025 (from 1 Apr 2026) renumbers sections (80C→123, 80CCD(1B)→124, 80D→126, 80E→129, 80G→133, 80GG→134, 80TTA/TTB→153, 87A→156, 24(b)→22, 115BAC→202, HRA→Schedule II); Income-tax Rules 2026 add 4 HRA metros; ITR-3/4 non-audit due 31 Aug; revised return to 31 Mar. Sources: cleartax.in (income-tax-changes-from-april-2026, section-156-income-tax-act-2025, income-tax-slabs), incometaxindia.gov.in (section-156), bajajhousingfinance.in/income-tax-slab, arth-website.vercel.app/income-tax-act-2025, tax2win.in, taxguru.in (HRA 8 cities) |
+| 2026-10-13 | The CA does not compute surcharge (income > ₹50 lakh), capital gains, or business income; it flags them instead | Keeps the calculator small, exact and explainable; out of scope for a salaried user's planning |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---

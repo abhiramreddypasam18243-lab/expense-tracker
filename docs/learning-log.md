@@ -308,3 +308,29 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why does the web version keep one database connection per session, while the desktop opens and closes one per rerun?
 2. What is the difference between an in-memory SQLite database and a temporary file, from a privacy point of view?
 3. A visitor uploads statements, then refreshes the page. What do they see, and why?
+
+## Step 14 — Virtual CA, offline (AC-70 to AC-77) — 2026-10-13
+
+**What was built**
+- `expenses/tax.py`: old vs new regime calculator for tax years 2025-26 and 2026-27 — slabs, standard deduction, deduction caps, HRA exemption, rebate with marginal relief, 4% cess, ₹10 rounding, tips that are re-computed (never guessed).
+- `expenses/ca.py`: finds tax-relevant transactions in the tax year (life/health insurance, PPF/ELSS, NPS, home/education loans, donations, rent, interest, salary), pre-fills deductions, builds the filing calendar and the document checklist.
+- `ui/ca.py`: the **Your CA** page (regime comparison, transactions, dates & checklist). Works on desktop and the web.
+- Tax rules researched on 2026-10-13 and recorded with sources in the Decisions Log.
+
+**Why it is designed this way**
+- *Rules as data, maths as code*: slabs, limits, metro cities and section names are tables; changing them for a new Budget means editing numbers, not logic.
+- *Exact money*: amounts stay in paise; a slab rate is applied with Decimal (`₹1,28,120 × 20% = ₹25,624`) and only the final values are rounded to ₹10, as the law does.
+- *Marginal relief*: at ₹12,25,000 taxable, slab tax is ₹63,750 but income above the ₹12 lakh rebate limit is only ₹25,000 — tax is capped at ₹25,000, so earning ₹1 more never costs more than ₹1 in tax.
+- *Section names follow the year*: the Income-tax Act, 2025 (from 1 April 2026) renumbered sections (80C → 123, 80D → 126, 87A → 156) but kept rates and limits; the page shows "s.123 (old 80C)" for 2026-27.
+- *Whole-word matching*: `\bLIC\b` so "POLICYBAZAAR" isn't read as a LIC premium; "HOSPITAL TREATMENT" isn't health insurance.
+- *Honest scope*: no surcharge (flagged above ₹50 lakh), no capital gains or business income, and "not professional advice" on the page.
+
+**Manual check**: ₹18,00,000 salary with the detected items → new regime ₹1,51,450, old ₹3,17,460 (both re-calculated by hand), new regime recommended; dates show 15 Dec 2026 as next; checklist adds rent, insurance, PPF and donation documents.
+
+**One thing that could go wrong**
+- Bank credits are take-home pay, not gross salary, so the pre-filled salary understates income; the page says so and asks for the Form 16 figure. Tax rules also change every Budget — the tables must be updated each year.
+
+**Quiz questions**
+1. Compute the new-regime tax on a ₹13,00,000 salary step by step. Where does marginal relief come in?
+2. Why does the old regime have an age-dependent exemption but the new regime doesn't?
+3. Why are tips re-computed by running the calculator again instead of multiplying the extra investment by a tax rate?
