@@ -151,6 +151,21 @@ def insert_transaction(conn: sqlite3.Connection, row: dict) -> bool:
     return cur.rowcount == 1
 
 
+def existing_fingerprints(conn: sqlite3.Connection, fingerprints: list[str]) -> set[str]:
+    """Which of these fingerprints are already stored (combined-import preview)."""
+    found: set[str] = set()
+    for start in range(0, len(fingerprints), 500):  # stay under SQLite's bound-parameter limit
+        chunk = fingerprints[start : start + 500]
+        marks = ",".join("?" * len(chunk))
+        found.update(
+            r[0]
+            for r in conn.execute(
+                f"SELECT fingerprint FROM transactions WHERE fingerprint IN ({marks})", chunk
+            )
+        )
+    return found
+
+
 def list_non_manual_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Rows that rules may (re)categorise: everything except manual overrides."""
     return conn.execute(

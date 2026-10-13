@@ -135,7 +135,7 @@ def extract_merchant(description_norm: str) -> str | None:
 # --- I8 currency -----------------------------------------------------------------------------
 
 
-class _RateLookup:
+class RateLookup:
     """DB cache in front of the live fetch. Failures are remembered for this import only."""
 
     def __init__(self, conn: sqlite3.Connection, fetch_rate: FetchRate) -> None:
@@ -172,7 +172,7 @@ def _cell(row: list[str], index: int | None) -> str:
     return row[index]
 
 
-def _parse_row(row: list[str], cols: ColumnMap, rates: _RateLookup) -> dict:
+def _parse_row(row: list[str], cols: ColumnMap, rates: RateLookup) -> dict:
     try:
         txn_date = parse_date(_cell(row, cols.date))
     except DateParseError:
@@ -218,6 +218,87 @@ def _parse_row(row: list[str], cols: ColumnMap, rates: _RateLookup) -> dict:
 # --- I6/I7 import -------------------------------------------------------------------------------
 
 
+@dataclass
+class PreparedFile:
+    """A parsed statement, ready to insert. Nothing has been written to the database yet."""
+
+    account: str
+    source_name: str
+    rows_total: int = 0
+    rows: list[dict] = field(default_factory=list)  # insert-ready rows (they also carry "line")
+    errors: list[tuple[int, str]] = field(default_factory=list)
+
+
+def base_name(source_name: str) -> str:
+    """File name only, never the folder path: 'C:/x/hdfc.csv' -> 'hdfc.csv'."""
+    return source_name.replace("\\", "/").split("/")[-1]
+
+
+def prepare_file(
+    conn: sqlite3.Connection,
+    text: str,
+    account: str,
+    source_name: str,
+    rates: RateLookup,
+    rules: list,
+    fallback_category: int,
+) -> PreparedFile:
+    """Parse, normalise, fingerprint and categorise one statement (I1-I5, I8). No database writes,
+    except caching exchange rates. Raises HeaderNotFoundError if the file has no usable header."""
+    account = account.strip()
+    if not account:
+        raise ValueError("account name is required")
+    reader = csv.reader(io.StringIO(text.lstrip("\ufeff")))
+    rows = [(reader.line_num, row) for row in reader]
+    header_index, cols = find_header([row for _, row in rows])
+
+    prepared = PreparedFile(account=account, source_name=base_name(source_name))
+    counter = OccurrenceCounter()
+    for line, row in rows[header_index + 1 :]:
+        if not any(cell.strip() for cell in row):
+            continue  # blank or comma-only line
+        prepared.rows_total += 1
+        try:
+            parsed = _parse_row(row, cols, rates)
+        except _RowRejected as exc:
+            prepared.errors.append((line, str(exc)))
+            continue
+
+        key = (
+            account,
+            parsed["txn_date"],
+            parsed["orig_currency"],
+            parsed["orig_amount_minor"],
+            parsed["description_norm"],
+        )
+        parsed["fingerprint"] = fingerprint(*key, counter.next(*key))
+        parsed["txn_date"] = parsed["txn_date"].isoformat()
+        parsed["category_id"], parsed["category_source"] = categorize.categorize(
+            parsed["description_norm"], rules, fallback_category
+        )
+        parsed["account"] = account
+        parsed["line"] = line
+        prepared.rows.append(parsed)
+    return prepared
+
+
+def insert_rows(conn: sqlite3.Connection, batch_id: int, rows: list[dict]) -> tuple[int, int]:
+    """Insert prepared rows into a batch. Returns (imported, duplicate). Call inside `with conn:`."""
+    imported = duplicate = 0
+    for row in rows:
+        if db.insert_transaction(conn, {**row, "batch_id": batch_id}):
+            imported += 1
+        else:
+            duplicate += 1
+    return imported, duplicate
+
+
+def import_context(conn: sqlite3.Connection, fetch_rate: FetchRate) -> tuple[RateLookup, list, int]:
+    """Rules, fallback category and rate lookup shared by every file of one import."""
+    categorize.seed_defaults(conn)  # before any `with conn:` — it commits on its own
+    return RateLookup(conn, fetch_rate), categorize.list_rules(conn), categorize.uncategorised_id(conn)
+
+
 def import_csv(
     conn: sqlite3.Connection,
     text: str,
@@ -229,61 +310,20 @@ def import_csv(
 
     The whole file is one database transaction: either all valid rows land or none do.
     """
-    account = account.strip()
-    if not account:
-        raise ValueError("account name is required")
-
-    reader = csv.reader(io.StringIO(text.lstrip("﻿")))
-    rows = [(reader.line_num, row) for row in reader]
-    header_index, cols = find_header([row for _, row in rows])
-
-    categorize.seed_defaults(conn)  # before `with conn:` below — it commits on its own
-    rules = categorize.list_rules(conn)
-    fallback_category = categorize.uncategorised_id(conn)
-    rates = _RateLookup(conn, fetch_rate)
-    counter = OccurrenceCounter()
+    rates, rules, fallback = import_context(conn, fetch_rate)
+    prepared = prepare_file(conn, text, account, source_name, rates, rules, fallback)
     with conn:
-        batch_id = db.create_batch(
-            conn, source_name=source_name.replace("\\", "/").split("/")[-1], account=account
+        batch_id = db.create_batch(conn, source_name=prepared.source_name, account=prepared.account)
+        imported, duplicate = insert_rows(conn, batch_id, prepared.rows)
+        report = ImportReport(
+            batch_id=batch_id,
+            rows_total=prepared.rows_total,
+            rows_imported=imported,
+            rows_duplicate=duplicate,
+            rows_rejected=len(prepared.errors),
+            errors=prepared.errors,
         )
-        report = ImportReport(batch_id=batch_id)
-        for line, row in rows[header_index + 1 :]:
-            if not any(cell.strip() for cell in row):
-                continue  # blank or comma-only line
-            report.rows_total += 1
-            try:
-                parsed = _parse_row(row, cols, rates)
-            except _RowRejected as exc:
-                report.rows_rejected += 1
-                report.errors.append((line, str(exc)))
-                continue
-
-            key = (
-                account,
-                parsed["txn_date"],
-                parsed["orig_currency"],
-                parsed["orig_amount_minor"],
-                parsed["description_norm"],
-            )
-            occurrence = counter.next(*key)
-            parsed["fingerprint"] = fingerprint(*key, occurrence)
-            parsed["txn_date"] = parsed["txn_date"].isoformat()
-            parsed["category_id"], parsed["category_source"] = categorize.categorize(
-                parsed["description_norm"], rules, fallback_category
-            )
-            if db.insert_transaction(conn, {**parsed, "account": account, "batch_id": batch_id}):
-                report.rows_imported += 1
-            else:
-                report.rows_duplicate += 1
-
-        db.finish_batch(
-            conn,
-            batch_id,
-            report.rows_total,
-            report.rows_imported,
-            report.rows_duplicate,
-            report.rows_rejected,
-        )
+        db.finish_batch(conn, batch_id, report.rows_total, imported, duplicate, report.rows_rejected)
 
     # Counts and IDs only — never descriptions, merchants or amounts (privacy rule).
     log.info(

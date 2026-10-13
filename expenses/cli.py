@@ -10,7 +10,7 @@ import logging
 import sys
 from collections.abc import Sequence
 
-from expenses import categorize, db, exporter, insights, recurring
+from expenses import categorize, combine, db, exporter, insights, recurring
 from expenses.anomaly import find_anomalies
 from expenses.importer import HeaderNotFoundError, import_file, undo_import
 from expenses.money import format_inr
@@ -42,6 +42,48 @@ def cmd_import(conn, args) -> None:
         print(f"  line {line}: {reason}")
     if report.rows_imported:
         print(f"Undo with: python -m expenses undo-import {report.batch_id}")
+
+
+def cmd_import_many(conn, args) -> None:
+    inputs = []
+    for item in args.files:
+        path, sep, account = item.partition("=")
+        if not sep or not path or not account.strip():
+            raise UserError(f'expected FILE=ACCOUNT, e.g. hdfc.csv="HDFC Savings" (got {item!r})')
+        try:
+            with open(path, "rb") as fh:
+                inputs.append(combine.StatementInput(fh.read(), account, path))
+        except FileNotFoundError:
+            raise UserError(f"file not found: {path}") from None
+
+    plan = combine.preview(conn, inputs)
+    print(f"{'File':<28}  {'Account':<20}  {'Rows':>5}  {'New':>5}  {'Dup':>5}  {'Rej':>5}  Status")
+    for f in plan.files:
+        name, account = _shorten(f.source_name, 28), _shorten(f.account, 20)
+        counts = f"{f.rows_total:>5}  {f.new:>5}  {f.duplicate:>5}  {f.rejected:>5}"
+        print(f"{name:<28}  {account:<20}  {counts}  {f.problem or 'ready'}")
+        for line, reason in f.errors:
+            print(f"    line {line}: {reason}")
+    if plan.pairs:
+        print("\nTransfer pairs between your accounts (saved as Transfers unless --no-transfers):")
+        for p in plan.pairs:
+            out, into = _shorten(p.debit.account, 18), _shorten(p.credit.account, 18)
+            amount = format_inr(p.credit.amount_minor)
+            print(f"  {p.debit.txn_date}  {out:<18} -> {p.credit.txn_date}  {into:<18}  {amount:>14}")
+    else:
+        print("\nTransfer pairs: none found")
+    if not plan.ok:
+        raise UserError("some files have a problem; nothing was imported")
+    if not args.yes:
+        print(f"\nDry run: nothing imported. Add --yes to import {plan.new_rows} new transaction(s).")
+        return
+
+    report = combine.commit(conn, plan, confirmed=set() if args.no_transfers else None)
+    print(
+        f"\nImported batch {report.batch_id}: {report.rows_imported} new transaction(s) from "
+        f"{len(report.files)} file(s). Marked {report.transfers_marked} transfer pair(s) as Transfers."
+    )
+    print(f"Undo with: python -m expenses undo-import {report.batch_id}")
 
 
 def cmd_list(conn, args) -> None:
@@ -145,6 +187,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("csv")
     p.add_argument("--account", required=True, help="account name, e.g. 'HDFC Savings'")
     p.set_defaults(func=cmd_import)
+
+    p = sub.add_parser("import-many", help="import several statements (accounts) at once, matching transfers")
+    p.add_argument("files", nargs="+", metavar="FILE=ACCOUNT")
+    p.add_argument("--yes", action="store_true", help="really import (without it: preview only)")
+    p.add_argument("--no-transfers", action="store_true", help="don't mark transfer pairs")
+    p.set_defaults(func=cmd_import_many)
 
     p = sub.add_parser("list", help="list transactions")
     p.add_argument("--month", help="YYYY-MM")

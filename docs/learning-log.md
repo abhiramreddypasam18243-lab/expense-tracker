@@ -247,3 +247,28 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why does the launcher check health *before* running `docker compose up`?
 2. Why is `127.0.0.1` safer than `localhost` for talking to a service inside WSL from Windows?
 3. What exactly stops a hosted copy of this app from ever showing real bank data?
+
+## Step 11 — Combined import of several statements (AC-60 to AC-65) — 2026-10-13
+
+**What was built**
+- `expenses/combine.py`: `preview()` (parse every file, count new / duplicate / rejected, find transfer pairs, write nothing) and `commit()` (all files in one transaction and one batch; confirmed pairs saved as Transfers).
+- `importer.py` refactored into `prepare_file` (parse → normalise → fingerprint → categorise, no writes) and `insert_rows`; `import_csv` is now just those two steps, so the single-file behaviour is unchanged (all earlier tests still pass).
+- CLI `import-many FILE=ACCOUNT ... [--yes] [--no-transfers]` (dry run by default); Import page with a multi-file uploader, an account picker per file, a combined preview and tick boxes for transfer pairs.
+
+**Why it is designed this way**
+- *Preview, then commit*: the user sees exactly what will happen (per file, and every transfer pair) before anything is written; the Import button is disabled while any file has a blocking problem — all or nothing (owner's choice).
+- *Transfer pairs*: when you combine accounts, money moving between them shows up twice — a debit in one and a credit in the other. Example from the manual check: HDFC −₹20,000 on 5 Mar and ICICI card +₹20,000 on 6 Mar, plus HDFC −₹5,000 → SBI +₹5,000. Without matching, March showed ₹25,000 of fake "income" and ₹29,108 of spend; with matching, ₹0 income and ₹4,108 of real spend.
+- *Matching rule*: same INR amount, opposite sign, **different** accounts, ≤ 3 days apart, each row used once, closest date first. Banks post the two sides on different days (weekends, card cycles), hence the window; one-to-one stops a single ₹500 credit from "absorbing" two ₹500 debits.
+- *User confirms*: an unrelated ₹500 spend and ₹500 refund could look like a transfer, so pairs are pre-ticked but can be unticked; confirmed pairs are stored as `manual` so "Re-run rules" never undoes them.
+- *One batch for the whole set*: one Undo removes everything, without adding a new table.
+- *Duplicates across files*: two overlapping statements of the **same** account in one upload are de-duplicated against each other (the preview tracks fingerprints of earlier files), as well as against the database.
+
+**One thing that could go wrong**
+- Only transfers *inside the uploaded set* are matched. If you import HDFC today and the ICICI statement next week, that ₹20,000 pair isn't matched automatically — import them together, or fix it with a rule / manual category.
+
+**Manual check (AC-65)**: three banks with three different layouts (amount; withdrawal/deposit; debit/credit with a preamble) uploaded at once in the browser, new account names typed in, preview showed 9 new rows and 2 transfer pairs, import created one batch, the summary showed spend ₹4,108 and income ₹0. The desktop container was rebuilt with this version and is healthy.
+
+**Quiz questions**
+1. Why can't the matcher require the two sides of a transfer to have the same date?
+2. A ₹1,000 debit in HDFC could pair with ICICI credits of ₹1,000 on day +1 and day +3. Which one does it pick, and what happens to the other?
+3. Why are confirmed transfer pairs saved with `category_source = 'manual'` instead of `'rule'`?

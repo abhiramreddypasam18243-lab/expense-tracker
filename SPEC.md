@@ -140,6 +140,20 @@ Each import returns an `ImportReport` with `batch_id`, `rows_total`, `rows_impor
 - **Failure**: if the network is down, the provider has no rate, or the code is unknown, the row is **rejected** with the reason "exchange rate unavailable" (I6). It is never guessed.
 - **Testability**: the importer takes the rate lookup as an injectable function, so tests never touch the network.
 
+### I9. Combined import (several statements, several accounts)
+
+Import several statements at once — typically one per bank account — as one unit.
+
+1. **Preview** (`combine.preview`), which writes nothing to the database. For every file it shows: account, rows in file, new rows, duplicates (already in the database, or repeated in an earlier file of the **same** account in this set), rejected rows with reasons, and a **blocking problem** if the file can't be read (no header, not UTF-8, missing account name).
+2. **Transfer pairs between your own accounts** are found among the new, valid rows:
+   - one debit and one credit with the **same INR amount** (`a = −b`), in **different accounts**, at most **3 days** apart;
+   - each row is used in at most one pair; debits are matched in date order, each to the unused credit with the **closest date** (ties: earliest credit, then file order);
+   - every pair is shown in the preview, **pre-ticked**; the user can untick any pair (decision: "detect, you confirm").
+3. **Commit** (`combine.commit`), **all or nothing**: if any file has a blocking problem, nothing is imported. Otherwise every file is imported in **one database transaction** as **one import batch** (source = the file names, account = the account names), so one Undo removes the whole set. Rows in ticked pairs get the first category of kind `transfer` (re-created as "Transfers" if none exists) with `category_source = manual`, so "Re-run rules" never undoes them. Unticked pairs keep their rule category.
+4. The result is a report per file (imported, duplicate, rejected, errors) plus the number of transfer pairs marked.
+
+The single-file import (I7) still works the same way.
+
 ## 5. Categorisation
 
 - **Default categories** are seeded on first run: Food & Dining, Groceries, Transport, Shopping, Bills & Utilities, Rent, Entertainment, Health, Education, Travel, Salary (income), Refunds (income), Transfers (transfer), Cash (expense), Uncategorised. Each has a fixed colour from the UI palette.
@@ -209,6 +223,7 @@ Spot subscriptions and fixed monthly bills.
 | `export <out.csv> [--month YYYY-MM]` | Export transactions to CSV, with amounts as plain INR decimals plus `Original Currency` and `Original Amount` columns |
 | `recurring` | Recurring payments (6.4) |
 | `undo-import <batch_id>` | Delete a batch |
+| `import-many FILE=ACCOUNT ... [--yes] [--no-transfers]` | Combined import (I9). Without `--yes` it only prints the preview (dry run, nothing written). `--no-transfers` imports without marking transfer pairs. |
 
 Exit code is 0 on success, 1 on user error (bad file or bad arguments), and 2 on an internal error.
 
@@ -238,7 +253,8 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
    - An editable table where only the category column can be changed (the edit becomes a manual override).
    - A CSV export button.
 3. **Import**:
-   - A file uploader, an account name field and an Import button.
+   - A **multi-file** uploader. For each file, pick an existing account or type a new one.
+   - A **combined preview** (I9): a per-file table and the transfer pairs, each with a tick box. The Import button stays disabled while any file has a blocking problem.
    - The result is shown as 4 metric chips (total, imported, duplicate, rejected) plus a rejected-rows table.
    - An import history list with Undo.
 4. **Insights**: the anomaly table with an explanation of each score ("₹8,400 vs typical ₹450 in Food & Dining"), the top merchants, and a **Recurring payments** card (6.4) with the total per month, each payment's typical amount, next expected date and an Active / Stopped badge.
@@ -406,6 +422,12 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-57** Anomalies must also be at least 2× the category median: with 12 × ₹649, 6 × ₹119 and tickets of ₹677–₹2,000 (MAD = ₹28), only ₹2,000 is flagged, even though ₹800 alone scores above 3.5.
 - **AC-58** The launcher scripts exist; `start.ps1` checks health before starting, waits for health with a timeout, opens `msedge --app=http://127.0.0.1:8501`, and never references the public compose file; `install-shortcuts.ps1` creates Desktop and Start-menu shortcuts with `icon.ico`; `icon.ico` is a valid ICO file. Manual check: double-clicking the shortcut opens the app window (recorded in the learning log).
 - **AC-59** `demo_app.py` always runs in demo mode: even with `EXPENSES_PUBLIC=1`, no hash and `EXPENSES_DB` set, it shows the demo banner and seeded data, and never creates the `EXPENSES_DB` file.
+- **AC-60** `combine.preview` on 3 files (two accounts, one file repeating rows of another file of the same account, one row already in the database) reports correct per-file totals, new rows, duplicates and rejected rows, and writes nothing (no transactions, no batches).
+- **AC-61** Transfer detection: a ₹20,000 debit in HDFC and a ₹20,000 credit in ICICI 1 day later form a pair; the same amounts 4 days apart, or within one account, do not; with two possible credits the closer date wins and each row is in at most one pair.
+- **AC-62** All or nothing: a file with no header, or with an empty account name, is a blocking problem in the preview, `commit` raises `CombinedImportError`, and the database is unchanged.
+- **AC-63** Commit imports every file as one batch; ticked pairs land in Transfers with source `manual` and stay there after "Re-run rules"; an unticked pair keeps its rule category; `undo_import(batch)` removes every row of every file.
+- **AC-64** CLI `import-many a.csv="HDFC Savings" b.csv="ICICI Card"`: without `--yes` it prints the preview and pairs and writes nothing (exit 0); with `--yes` it imports and marks pairs; with `--no-transfers` it marks none; a malformed argument (no `=`) or a missing file exits 1.
+- **AC-65** The Import page renders with a multi-file uploader (`accept_multiple_files`); demo mode is unchanged. Manual check: uploading two statements in the browser shows the combined preview and the transfer pairs, and the import works (recorded in the learning log).
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -422,6 +444,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 8 | Hardening: passphrase gate, demo mode, network check | AC-41 – AC-43 |
 | 9 | Extras: merchant acronyms, Cash/ATM rules, HTTPS for public mode, recurring payments, original currency in export, anomaly 2× rule | AC-49 – AC-57 |
 | 10 | Desktop app launcher and internet-demo entry point | AC-58 – AC-59 |
+| 11 | Combined multi-statement import with transfer matching | AC-60 – AC-65 |
 
 Rebuild the container after every step.
 
@@ -472,6 +495,9 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-12 | **Anomaly 2× rule**: flag only if `M > 3.5` and the amount is at least 2× the category median (owner's choice) | Adding the monthly Spotify payment exposed a MAD weakness: 14 of 29 Entertainment payments were ₹649, so MAD = ₹0.69 and every cinema ticket looked "unusual". The 2× materiality check is simple to explain and keeps the real outliers |
 | 2026-10-13 | **Step 10**: Windows desktop launcher (Docker in WSL + Edge app window) and a public demo on Streamlit Community Cloud (owner's choice: "Desktop app + internet demo") | Real data stays on the PC; only the forced-demo entry point is ever hosted |
 | 2026-10-13 | The launcher uses `127.0.0.1`, not `localhost` | Found in the manual check: Windows PowerShell resolves `localhost` to IPv6 `::1` first, which WSL doesn't forward, so the health check hung |
+| 2026-10-13 | **Step 11 — combined import (I9)**: transfers are detected and the user confirms each pair; all-or-nothing; available in the UI and CLI (owner's choices) | Combining statements double-counts money moved between own accounts unless the pair is recognised |
+| 2026-10-13 | A combined import is stored as **one** import batch (file and account names joined) rather than a new "group" table | One Undo for the whole set without a schema migration |
+| 2026-10-13 | Confirmed transfer pairs are stored with `category_source = manual` | The user confirmed them, so rules must not overwrite them |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---
