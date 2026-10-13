@@ -14,6 +14,7 @@ from expenses import categorize, combine, db, exporter, insights, recurring
 from expenses.anomaly import find_anomalies
 from expenses.importer import HeaderNotFoundError, import_file, undo_import
 from expenses.money import format_inr
+from expenses.pdf_import import PdfImportError, pdf_to_csv
 
 
 class UserError(Exception):
@@ -52,7 +53,7 @@ def cmd_import_many(conn, args) -> None:
             raise UserError(f'expected FILE=ACCOUNT, e.g. hdfc.csv="HDFC Savings" (got {item!r})')
         try:
             with open(path, "rb") as fh:
-                inputs.append(combine.StatementInput(fh.read(), account, path))
+                inputs.append(combine.StatementInput(fh.read(), account, path, password=args.pdf_password))
         except FileNotFoundError:
             raise UserError(f"file not found: {path}") from None
 
@@ -84,6 +85,24 @@ def cmd_import_many(conn, args) -> None:
         f"{len(report.files)} file(s). Marked {report.transfers_marked} transfer pair(s) as Transfers."
     )
     print(f"Undo with: python -m expenses undo-import {report.batch_id}")
+
+
+def cmd_pdf_to_csv(conn, args) -> None:
+    try:
+        with open(args.pdf, "rb") as fh:
+            data = fh.read()
+    except FileNotFoundError:
+        raise UserError(f"file not found: {args.pdf}") from None
+    try:
+        conversion = pdf_to_csv(data, args.password)
+    except PdfImportError as exc:
+        raise UserError(str(exc)) from None  # the message never contains the password
+    try:
+        with open(args.out, "w", encoding="utf-8", newline="") as fh:
+            fh.write(conversion.csv_text)
+    except OSError as exc:
+        raise UserError(f"cannot write {args.out}: {exc.strerror}") from None
+    print(f"Converted {conversion.pages} page(s) into {conversion.rows} row(s): {args.out}")
 
 
 def cmd_list(conn, args) -> None:
@@ -192,7 +211,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("files", nargs="+", metavar="FILE=ACCOUNT")
     p.add_argument("--yes", action="store_true", help="really import (without it: preview only)")
     p.add_argument("--no-transfers", action="store_true", help="don't mark transfer pairs")
+    p.add_argument("--pdf-password", help="password for password-protected PDF statements")
     p.set_defaults(func=cmd_import_many)
+
+    p = sub.add_parser("pdf-to-csv", help="convert a PDF bank statement to CSV")
+    p.add_argument("pdf")
+    p.add_argument("out")
+    p.add_argument("--password", help="for password-protected PDFs (never stored)")
+    p.set_defaults(func=cmd_pdf_to_csv)
 
     p = sub.add_parser("list", help="list transactions")
     p.add_argument("--month", help="YYYY-MM")

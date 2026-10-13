@@ -154,6 +154,17 @@ Import several statements at once — typically one per bank account — as one 
 
 The single-file import (I7) still works the same way.
 
+### I10. PDF statements (Step 17)
+
+Bank statements often arrive as PDFs (frequently password-protected). A PDF is converted to CSV text and then imported exactly like a CSV (I1–I9).
+
+- **Detection**: by content — a file whose bytes start with `%PDF` is a PDF, whatever its name.
+- **Conversion** (`expenses/pdf_import.py`, library **pdfplumber**): every page's tables are read (ruled-line strategy first, then text-alignment strategy for statements without lines). Cells are trimmed and line breaks inside a cell become spaces. The header row is found with the same alias detection as CSVs (I3); a header **repeated** on later pages is dropped; a row whose date cell is empty is a **continuation** of the previous row's description and is joined to it; blank rows are dropped. The result is CSV text (header + rows) that the user can **download**.
+- **Password**: an encrypted PDF needs its password (often the customer's date of birth or ID, as the bank's email says). It is used once, in memory, and is never stored, logged or shown in messages.
+- **Clear errors** (blocking problems in the combined preview): password needed; wrong password; **scanned** PDF (pages with no selectable text — OCR is out of scope: "download the statement again from net banking, or export it as CSV"); not a real PDF; no transaction table found.
+- **Interfaces**: the Import page accepts `.csv` and `.pdf` together, shows a password field for each PDF and a **Download as CSV** button for each converted PDF; the CLI gets `pdf-to-csv <in.pdf> <out.csv> [--password P]`, and `import-many` accepts PDFs with `--pdf-password P`.
+- **Test data**: `tools/make_synthetic.py --format pdf` writes a bank-style PDF (preamble, ruled table, several pages, optional password) with **fpdf2** (development only, not in the app image).
+
 ## 5. Categorisation
 
 - **Default categories** are seeded on first run: Food & Dining, Groceries, Transport, Shopping, Bills & Utilities, Rent, Entertainment, Health, Education, Travel, Salary (income), Refunds (income), Transfers (transfer), Cash (expense), Uncategorised. Each has a fixed colour from the UI palette.
@@ -275,6 +286,7 @@ A chat tab on the "Your CA" page, answered by a **free model running on this PC*
 | `export <out.csv> [--month YYYY-MM]` | Export transactions to CSV, with amounts as plain INR decimals plus `Original Currency` and `Original Amount` columns |
 | `recurring` | Recurring payments (6.4) |
 | `undo-import <batch_id>` | Delete a batch |
+| `pdf-to-csv <in.pdf> <out.csv> [--password P]` | Convert a PDF statement to CSV (I10) |
 | `import-many FILE=ACCOUNT ... [--yes] [--no-transfers]` | Combined import (I9). Without `--yes` it only prints the preview (dry run, nothing written). `--no-transfers` imports without marking transfer pairs. |
 
 Exit code is 0 on success, 1 on user error (bad file or bad arguments), and 2 on an internal error.
@@ -516,6 +528,12 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-85** The dashboard shows the month story and four KPI cards (Spend, Income, Net, Transactions) with ₹ values and a sparkline; the donut data groups non-core categories into "Other"; with no data, the illustrated empty state appears.
 - **AC-86** Every page still renders (empty, sample data, web mode) in both light and dark theme; layer separation (AC-36) still holds.
 - **AC-87** Manual check: screenshots of every page in light and dark mode and at phone width are reviewed; the category palette passes the data-viz validator in both modes (recorded in the learning log).
+- **AC-88** A synthetic multi-page PDF statement (preamble, ruled table, header repeated on each page) converts to CSV, and importing it gives exactly the same transactions (dates, descriptions, signed amounts) as importing the CSV version of the same statement.
+- **AC-89** Conversion joins descriptions wrapped onto a continuation row (empty date cell), drops repeated headers and blank rows, and turns line breaks inside cells into spaces.
+- **AC-90** A password-protected PDF: no password → "password-protected" error; wrong password → "wrong password" error; right password → converts. The password never appears in any error message or log line.
+- **AC-91** A scanned (image-only) PDF → the "scanned PDF" error; bytes that aren't a PDF → "not a PDF"; a text PDF without a transaction table → "no transaction table" error.
+- **AC-92** `combine.preview` accepts PDFs and CSVs together (PDF detected by content), passes each PDF's password, reports PDF problems as blocking per file, and keeps the converted CSV for download; the CLI `pdf-to-csv` writes the CSV (exit 0; wrong password → exit 1) and `import-many --pdf-password` imports PDFs.
+- **AC-93** The Import page's uploader accepts `.csv` and `.pdf`. Manual check: in the browser, a password-protected PDF and a CSV are uploaded together, the password is entered, the converted CSV downloads, and the import works (recorded in the learning log).
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
 ## 13. Build order
@@ -538,12 +556,13 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 14 | Virtual CA (offline): tax planning, tax-relevant transactions, filing dates & checklist | AC-70 – AC-77 |
 | 15 | Ask your CA: local AI chat (Ollama in Docker), grounded in the CA's figures | AC-78 – AC-82 |
 | 16 | Visual redesign: design tokens, bundled fonts, cards, hero, KPI cards, validated chart palette | AC-83 – AC-87 |
+| 17 | PDF statements: convert to CSV (password-protected too) and import | AC-88 – AC-93 |
 
 Rebuild the container after every step.
 
 ## 14. Out of scope
 
-Multi-user support and login (other than the passphrase gate), bank APIs, PDF or XLS import, ML or LLM categorisation, multi-currency reporting or offline rate tables, non-monthly recurring payments (weekly, yearly), tax on capital gains / business income / surcharge, actual ITR filing, split transactions, attachments and receipts, mobile app, and cloud sync.
+Multi-user support and login (other than the passphrase gate), bank APIs, XLS import, OCR of scanned PDFs, ML or LLM categorisation, multi-currency reporting or offline rate tables, non-monthly recurring payments (weekly, yearly), tax on capital gains / business income / surcharge, actual ITR filing, split transactions, attachments and receipts, mobile app, and cloud sync.
 
 ## 15. Open questions
 
@@ -602,6 +621,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | The model never does the tax maths; it explains the calculator's results | Small models make arithmetic mistakes; the viva-defensible numbers come from `tax.py` |
 | 2026-10-13 | **Visual redesign** (owner: "very basic, make it look very good"): fintech style with an indigo→violet gradient accent, Inter + Plus Jakarta Sans bundled locally, raised cards, KPI cards with sparklines | The previous theme was clean but plain; fonts are bundled so the offline rule still holds |
 | 2026-10-13 | Category chart colours switched to a validated 8-hue palette; other categories fold into "Other" | The old Tailwind colours failed the colour check (Transport blue vs Education indigo: ΔE 7.2, below the 15 floor even for full colour vision) |
+| 2026-10-13 | **PDF statements** (owner's request): new runtime dependency **pdfplumber 0.11.10** (pulls pdfminer.six, pypdfium2, Pillow) and dev-only **fpdf2 2.8.9** for synthetic PDFs — both approved by the owner | pdfplumber reads tables cell by cell (pypdf only gives raw text, which would misplace columns); fpdf2 lets tests use synthetic PDFs, never real statements |
+| 2026-10-13 | Scanned PDFs get a clear message instead of OCR (owner's choice) | OCR needs a ~100 MB engine, is slow, misreads digits in amounts, and can't run on the web version |
 | 2026-10-12 | New default categories and rules (Cash, ATM) only reach a **fresh** database | Seeding never touches an existing database (AC-23); add them in Settings on an older database |
 
 ---

@@ -129,16 +129,72 @@ def generate_csv(seed: int, layout: str = "amount", months: int = 6, start: date
     return buf.getvalue()
 
 
+def table_pdf(
+    header: list[str], rows: list[list[str]], preamble: list[str] = (), password: str | None = None
+) -> bytes:
+    """A bank-style PDF: preamble lines, then a ruled table whose header repeats on every page.
+
+    Development/test tool only (needs fpdf2 from requirements-dev.txt).
+    """
+    from fpdf import FPDF
+    from fpdf.enums import EncryptionMethod, TableHeadingsDisplay
+
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    if password is not None:
+        pdf.set_encryption(
+            owner_password=password + "-owner", user_password=password, encryption_method=EncryptionMethod.RC4
+        )
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=9)
+    for line in preamble:
+        pdf.cell(0, 6, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+    widths = (24, 92, 26, 26, 22)[: len(header)]
+    with pdf.table(
+        col_widths=widths, line_height=5, repeat_headings=TableHeadingsDisplay.ON_TOP_OF_EVERY_PAGE
+    ) as table:
+        table.row(header)
+        for row in rows:
+            table.row(row)
+    return bytes(pdf.output())
+
+
+def generate_pdf(
+    seed: int, months: int = 6, start: date = date(2026, 1, 1), password: str | None = None
+) -> bytes:
+    """The debit/credit statement of generate_csv(..., "debit_credit") as a multi-page PDF."""
+    rows = generate_rows(seed, months, start)
+    body = [
+        [f"{d:%d/%m/%Y}", desc, _grouped(-p) if p < 0 else "", _grouped(p) if p > 0 else ""]
+        for d, desc, p in rows
+    ]
+    preamble = [
+        "SYNTHETIC BANK LTD - Statement of Account",
+        "Account: SYN-XXXX-0001",
+        f"Period: {rows[0][0]:%d/%m/%Y} to {rows[-1][0]:%d/%m/%Y}",
+    ]
+    return table_pdf(["Txn Date", "Narration", "Withdrawal Amt", "Deposit Amt"], body, preamble, password)
+
+
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Generate a synthetic bank statement CSV.")
+    parser = argparse.ArgumentParser(description="Generate a synthetic bank statement (CSV or PDF).")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--layout", choices=["amount", "debit_credit"], default="amount")
     parser.add_argument("--months", type=int, default=6)
-    parser.add_argument("--out", required=True, help="output CSV path")
+    parser.add_argument(
+        "--format", choices=["csv", "pdf"], default="csv", help="pdf uses the debit/credit layout"
+    )
+    parser.add_argument("--password", help="encrypt the PDF with this password (pdf only)")
+    parser.add_argument("--out", required=True, help="output file path")
     args = parser.parse_args(argv)
-    text = generate_csv(args.seed, args.layout, args.months)
-    with open(args.out, "w", encoding="utf-8", newline="") as fh:
-        fh.write(text)
+    if args.format == "pdf":
+        with open(args.out, "wb") as fh:
+            fh.write(generate_pdf(args.seed, args.months, password=args.password))
+    else:
+        text = generate_csv(args.seed, args.layout, args.months)
+        with open(args.out, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
     print(f"wrote {args.out}")
 
 

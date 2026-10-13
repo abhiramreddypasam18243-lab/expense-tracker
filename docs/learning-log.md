@@ -394,3 +394,28 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why are the icons drawn as `data:image/svg+xml` images instead of inline `<svg>`?
 2. Why does the donut show at most 8 colours plus "Other", instead of one colour per category?
 3. How does the app choose the light or dark set of tokens, and why are the chart colours different in dark mode?
+
+## Step 17 — PDF statements (AC-88 to AC-93) — 2026-10-13
+
+**What was built**
+- `expenses/pdf_import.py`: `pdf_to_csv(data, password)` — reads each page's table with **pdfplumber**, cleans it, and returns CSV text that goes through the normal import.
+- Combined import, CLI (`pdf-to-csv`, `import-many --pdf-password`) and the Import page accept PDFs next to CSVs; each PDF gets a password box and a **Download as CSV** button.
+- `tools/make_synthetic.py --format pdf [--password P]`: bank-style synthetic PDFs (fpdf2, dev only) so tests never need a real statement.
+- New dependencies (owner-approved): `pdfplumber==0.11.10` (app), `fpdf2==2.8.9` (dev).
+
+**Why it is designed this way**
+- *PDF → CSV → existing importer*: one import pipeline; everything learned for CSVs (column aliases, money and date rules, fingerprints, transfers) applies to PDFs for free. The round-trip test proves it: the PDF and the CSV of the same statement give identical transactions.
+- *Detected by content* (`%PDF` at the start), not by the file name — a PDF renamed to `.csv` still works.
+- *Cleanup rules*: cells with line breaks → one line; a row with an empty date and no amounts is the rest of the previous narration; a header printed again on page 2 is skipped.
+- *Passwords*: Indian banks usually lock statement PDFs (date of birth, customer ID). The password is used once in memory; error messages say "password-protected" or "wrong password" but never echo it (tested, including logs).
+- *Scans*: a page with no selectable text is a photo; reading it needs OCR, which the owner chose not to add — the app says so clearly instead of importing garbage.
+
+**Manual check (AC-93)**: browser upload of a locked PDF + a CSV → "password-protected" warning and import blocked → password entered → preview 100 + 3 rows → converted CSV downloaded → 103 transactions imported as one batch. Also converted inside the Docker container.
+
+**One thing that could go wrong**
+- Banks lay out PDFs differently. pdfplumber handles ruled tables and falls back to text alignment, but an unusual layout (e.g. amounts with "Dr/Cr" in a separate column, or two transactions side by side) may convert imperfectly. The preview shows the counts and the downloadable CSV, so the user can check before importing.
+
+**Quiz questions**
+1. Why convert a PDF to CSV and reuse the importer, instead of writing a separate PDF importer?
+2. A narration wraps onto a second table row with an empty date. How does the converter know it isn't a new transaction?
+3. Why does the app refuse scanned PDFs instead of trying to read them?

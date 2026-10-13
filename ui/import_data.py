@@ -1,11 +1,14 @@
 """Import: one or more statements at once (combined preview, transfer matching), history and undo."""
 
+import hashlib
+
 import pandas as pd
 import streamlit as st
 
 from expenses import auth, combine, db
 from expenses.importer import undo_import
 from expenses.money import format_inr
+from expenses.pdf_import import is_pdf
 from ui import demo
 from ui.common import card, esc, eyebrow, get_conn, nice_date, page_header
 
@@ -34,6 +37,9 @@ def show_combined_preview(plan: combine.CombinedPreview) -> set[int]:
         }
     )
     st.dataframe(files_df, hide_index=True, width="stretch")
+    for f in plan.files:  # the table cell can be too narrow for the whole message
+        if f.problem:
+            st.warning(f"**{f.source_name}**: {f.problem}", icon=":material/warning:")
     errors = [(f.source_name, line, reason) for f in plan.files for line, reason in f.errors]
     if errors:
         with st.expander(f"{len(errors)} row(s) will be skipped", icon=":material/warning:"):
@@ -100,8 +106,8 @@ else:
         eyebrow("New import")
         upload_version = st.session_state.setdefault("upload_version", 0)
         uploads = st.file_uploader(
-            "Statements (CSV) — one per account, as many as you like",
-            type=["csv"],
+            "Statements (CSV or PDF) — one per account, as many as you like",
+            type=["csv", "pdf"],
             accept_multiple_files=True,
             key=f"uploads-{upload_version}",
             help="Processed in memory; never saved to disk.",
@@ -110,10 +116,13 @@ else:
             st.markdown("**Which account is each file?** Pick one you've used before or type a new name.")
             inputs = []
             for up in uploads:
+                data = up.getvalue()
+                pdf = is_pdf(data)
                 name_col, account_col = st.columns([2, 3], vertical_alignment="center")
                 size = f"{up.size / 1024:.1f} KB" if up.size >= 1024 else f"{up.size} bytes"
                 name_col.html(
-                    f'<div class="item-title">{esc(up.name)}</div><div class="item-meta">{size}</div>'
+                    f'<div class="item-title">{esc(up.name)}</div>'
+                    f'<div class="item-meta">{"PDF · " if pdf else ""}{size}</div>'
                 )
                 account = account_col.selectbox(
                     f"Account for {up.name}",
@@ -124,10 +133,26 @@ else:
                     key=f"account-{up.file_id}",
                     label_visibility="collapsed",
                 )
-                inputs.append(combine.StatementInput(up.getvalue(), account or "", up.name))
+                password = None
+                if pdf:  # used once, in memory; never stored or logged
+                    password = (
+                        account_col.text_input(
+                            f"PDF password for {up.name}",
+                            type="password",
+                            key=f"pdf-password-{up.file_id}",
+                            placeholder="PDF password, if it has one (often your date of birth or customer ID)",
+                            label_visibility="collapsed",
+                        )
+                        or None
+                    )
+                inputs.append(combine.StatementInput(data, account or "", up.name, password=password))
 
             # Re-parse only when the files or accounts change (not on every click).
-            signature = tuple((up.file_id, i.account) for up, i in zip(uploads, inputs, strict=True))
+            # (The password is part of the key as a hash only, so a new password re-runs the conversion.)
+            signature = tuple(
+                (up.file_id, i.account, hashlib.sha256((i.password or "").encode()).hexdigest())
+                for up, i in zip(uploads, inputs, strict=True)
+            )
             if st.session_state.get("plan_sig") != signature:
                 st.session_state["plan"] = combine.preview(conn, inputs)
                 st.session_state["plan_sig"] = signature
@@ -136,6 +161,16 @@ else:
             st.divider()
             eyebrow("Preview — nothing is saved yet")
             confirmed = show_combined_preview(plan)
+            for f in plan.files:  # every converted PDF can be downloaded as CSV (I10)
+                if f.converted_csv is not None:
+                    st.download_button(
+                        f"Download {f.source_name} as CSV",
+                        f.converted_csv,
+                        file_name=f.source_name.rsplit(".", 1)[0] + ".csv",
+                        mime="text/csv",
+                        icon=":material/download:",
+                        key=f"pdf-csv-{f.source_name}",
+                    )
             if not plan.ok:
                 st.error(
                     "Fix or remove the files marked ⚠ to continue. Nothing is imported until every file is ready.",
@@ -201,13 +236,15 @@ with card("import-history"):
                 st.toast(f"Removed {removed} transactions", icon=":material/undo:")
                 st.rerun()
 
-with st.expander("Which CSV formats work?", icon=":material/help:"):
+with st.expander("Which files work?", icon=":material/help:"):
     st.markdown(
         """
 - One header row (it may come after a few lines of bank preamble) with a **date**, a **description**
   (narration / particulars) and either an **amount** column or **debit + credit** (withdrawal / deposit) columns.
 - Dates are read day-first (`03/04/2026` is 3 April). Amounts may use `₹`, `Rs`, commas, `Dr`/`Cr` or `( )`.
 - An optional **currency** column converts foreign rows to INR using that day's ECB rate.
+- **PDF statements** from net banking work too, including password-protected ones. Scanned PDFs (photos of
+  paper) can't be read — download the statement again, or export it as CSV.
 - Different banks in one go are fine: each file's columns are detected on their own.
 - For demo data, run `python tools/make_synthetic.py --out data/synthetic.csv`.
 """

@@ -21,6 +21,7 @@ from expenses.importer import (
     insert_rows,
     prepare_file,
 )
+from expenses.pdf_import import PdfImportError, is_pdf, pdf_to_csv
 
 log = logging.getLogger(__name__)
 
@@ -33,9 +34,10 @@ class CombinedImportError(ValueError):
 
 @dataclass
 class StatementInput:
-    raw: str | bytes  # file content; bytes are decoded as UTF-8
+    raw: str | bytes  # file content: CSV text, or bytes (UTF-8 CSV or a PDF, detected by content)
     account: str
     source_name: str
+    password: str | None = None  # for password-protected PDFs; used once, never stored
 
 
 @dataclass
@@ -48,6 +50,7 @@ class FilePreview:
     rejected: int = 0
     errors: list[tuple[int, str]] = field(default_factory=list)
     problem: str | None = None  # blocking: the whole combined import waits until it's fixed
+    converted_csv: str | None = None  # for a PDF: the CSV it was converted to (I10), for download
     rows: list[dict] = field(default_factory=list, repr=False)
 
 
@@ -122,8 +125,17 @@ def preview(
         if not f.account:
             f.problem = "Pick or type the account this statement belongs to."
             continue
+        if isinstance(item.raw, bytes) and is_pdf(item.raw):
+            try:
+                f.converted_csv = pdf_to_csv(item.raw, item.password).csv_text
+            except PdfImportError as exc:
+                f.problem = str(exc)[:1].upper() + str(exc)[1:] + "."
+                continue
         try:
-            text = item.raw.decode("utf-8-sig") if isinstance(item.raw, bytes) else item.raw
+            if f.converted_csv is not None:
+                text = f.converted_csv
+            else:
+                text = item.raw.decode("utf-8-sig") if isinstance(item.raw, bytes) else item.raw
             prepared = prepare_file(conn, text, f.account, item.source_name, rates, rules, fallback)
         except UnicodeDecodeError:
             f.problem = "Not UTF-8 text. Export the statement as CSV (UTF-8)."
