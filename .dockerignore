@@ -9,6 +9,7 @@ data
 .env
 certs
 *.pem
+*.key
 __pycache__
 *.pyc
 .pytest_cache

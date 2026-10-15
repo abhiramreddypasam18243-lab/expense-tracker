@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-from expenses import categorize, insights
+from expenses import categorize, insights, vault
 from expenses.money import MoneyParseError, format_inr, parse_amount
 from ui import theme
 from ui.common import card, esc, get_conn, page_header
@@ -20,15 +20,20 @@ def dot_color(name: str, stored: str) -> str:
 
 
 page_header(
-    "Settings", "Tune how transactions are categorised and set monthly budgets.", eyebrow_text="Preferences"
+    "Settings", "Tune categories and rules, set monthly budgets, and manage saved PDF passwords.", eyebrow_text="Preferences"
 )
 
 categories = categorize.list_categories(conn)
 by_name = {c["name"]: c for c in categories}
 by_id = {c["id"]: c for c in categories}
 
-tab_categories, tab_rules, tab_budgets = st.tabs(
-    [":material/category: Categories", ":material/rule: Rules", ":material/savings: Budgets"]
+tab_categories, tab_rules, tab_budgets, tab_passwords = st.tabs(
+    [
+        ":material/category: Categories",
+        ":material/rule: Rules",
+        ":material/savings: Budgets",
+        ":material/key: PDF passwords",
+    ]
 )
 
 # --- categories ----------------------------------------------------------------------------------------
@@ -176,3 +181,27 @@ with tab_budgets:
                     st.error("Enter an amount like 5,000 or 5000.50")
                 except ValueError as exc:
                     st.error(str(exc).capitalize())
+
+# --- remembered PDF passwords (I12) -------------------------------------------------------------------
+with tab_passwords, card("pdf-passwords"):
+    saved = vault.accounts(conn)
+    st.markdown("**Saved PDF passwords**")
+    st.caption(
+        "When a password opens a locked PDF statement, it's remembered for that account, so next month's "
+        "statement opens without typing. They're stored encrypted on this computer and never shown."
+    )
+    if not saved:
+        st.caption(
+            "None saved yet. Type a PDF's password on the Import page and it's remembered after importing."
+        )
+    for account in saved:
+        name_col, action_col = st.columns([5, 1], vertical_alignment="center")
+        name_col.markdown(f":material/lock: **{esc(account)}**")
+        if action_col.button("Forget", key=f"forget-pw-{account}", help=f"Forget the password for {account}"):
+            vault.forget(conn, account)
+            st.toast(f"Forgot the PDF password for {account}", icon=":material/check:")
+            st.rerun()
+    if len(saved) > 1 and st.button("Forget all", icon=":material/delete:"):
+        vault.forget_all(conn)
+        st.toast("Forgot all saved PDF passwords", icon=":material/check:")
+        st.rerun()

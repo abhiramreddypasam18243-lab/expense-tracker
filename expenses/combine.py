@@ -12,7 +12,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
 
-from expenses import categorize, db, fx
+from expenses import categorize, db, fx, vault
 from expenses.columns import ColumnRolesError, Inference
 from expenses.importer import (
     FetchRate,
@@ -38,7 +38,8 @@ class StatementInput:
     raw: str | bytes  # file content: CSV text, or bytes (UTF-8 CSV or a PDF, detected by content)
     account: str
     source_name: str
-    password: str | None = None  # for password-protected PDFs; used once, never stored
+    password: str | None = None  # for password-protected PDFs; never logged (saved only as in I12)
+    remember: bool = True  # save a typed password that opened the PDF for this account, on commit (I12)
     column_roles: dict[str, int] | None = None  # the user's column choice for a headerless file (I11)
 
 
@@ -54,6 +55,8 @@ class FilePreview:
     problem: str | None = None  # blocking: the whole combined import waits until it's fixed
     converted_csv: str | None = None  # for a PDF: the CSV it was converted to (I10), for download
     inferred: Inference | None = None  # columns guessed because the file had no heading row (I11)
+    used_saved_password: bool = False  # the PDF was opened with the account's remembered password (I12)
+    password_to_save: str | None = field(default=None, repr=False)  # saved on commit; never shown
     rows: list[dict] = field(default_factory=list, repr=False)
 
 
@@ -129,12 +132,22 @@ def preview(
             f.problem = "Pick or type the account this statement belongs to."
             continue
         if isinstance(item.raw, bytes) and is_pdf(item.raw):
+            typed = item.password or None
+            saved = None if typed else vault.get(conn, f.account)
             try:
-                conversion = pdf_to_csv(item.raw, item.password)
+                conversion = pdf_to_csv(item.raw, typed or saved)
                 f.converted_csv, f.inferred = conversion.csv_text, conversion.inferred
             except PdfImportError as exc:
-                f.problem = str(exc)[:1].upper() + str(exc)[1:] + "."
+                if saved and "wrong password" in str(exc):
+                    f.problem = (
+                        f"The saved password for {f.account} didn't open this PDF — enter the new one."
+                    )
+                else:
+                    f.problem = str(exc)[:1].upper() + str(exc)[1:] + "."
                 continue
+            f.used_saved_password = saved is not None and conversion.encrypted
+            if typed and item.remember and conversion.encrypted:
+                f.password_to_save = typed
         try:
             if f.converted_csv is not None:
                 text = f.converted_csv
@@ -247,6 +260,8 @@ def commit(
                     row["category_id"], row["category_source"] = transfer_id, "manual"
                 rows.append(row)
             imported, duplicate = insert_rows(conn, batch_id, rows)
+            if f.password_to_save:  # same transaction: saved only if the import succeeds (I12)
+                vault.save(conn, f.account, f.password_to_save)
             reports.append(FileReport(f.source_name, f.account, imported, duplicate, f.rejected, f.errors))
         db.finish_batch(
             conn,

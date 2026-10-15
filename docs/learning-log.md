@@ -469,3 +469,25 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why must a money column have two decimals in ≥ 80 % of its cells, and what would go wrong without that rule?
 2. How does the running balance tell debit from credit, and how does the check also work for newest-first statements?
 3. Why is the user's column choice part of the preview's re-run signature?
+
+## Step 20 — Remembered PDF passwords per account, encrypted (AC-105 to AC-108) — 2026-10-15
+
+**Why**: most bank statements arrive as locked PDFs with the same password every month; typing it each time is friction.
+
+**What was built** (`expenses/vault.py`)
+- Table `pdf_passwords(account, token, updated_at)`; `token` is the password encrypted with **Fernet** (`cryptography`, already installed because pdfminer needs it — now pinned).
+- The key is a random key in `pdf-passwords.key` **next to the database**, created once with owner-only permissions; an in-memory database (web version) gets a key that only exists in memory.
+- `combine.preview` tries the account's saved password when none is typed; `commit` saves a typed password that opened the PDF **inside the import's transaction** (a failed import saves nothing). A stale saved password gives "The saved password for X didn't open this PDF — enter the new one".
+- Import page: "Remember for this account" (on by default) and a placeholder saying the saved password will be used. Settings → **PDF passwords**: accounts listed, Forget / Forget all; the password is never shown. CLI: `forget-password ACCOUNT`.
+
+**Manual check (AC-108)**: in the browser, a locked PDF asked for its password; after importing, next month's PDF for the same account opened by itself ("opened with the saved password for HDFC Savings"); the password never appeared on the page; Settings listed the account and Forget removed it.
+
+**Why it is designed this way**
+- *Encrypt + separate key*: if you copy or back up `expenses.db`, the passwords stay unreadable without the key file. (Honest limit: someone with full access to your user account can read both files — this protects copies, not a compromised PC.)
+- *Save only on commit*: a password is remembered only when it really opened a PDF that you then imported.
+- *Losing the key is safe*: decryption fails → treated as "not saved" → you're simply asked again.
+
+**Quiz questions**
+1. Why is the key stored in a separate file instead of in the database next to the encrypted passwords?
+2. Why is the password saved inside the same `with conn:` transaction as the imported rows?
+3. What happens when the bank changes the PDF password, step by step?

@@ -184,10 +184,20 @@ Bank statements often arrive as PDFs (frequently password-protected). A PDF is c
 
 - **Detection**: by content — a file whose bytes start with `%PDF` is a PDF, whatever its name.
 - **Conversion** (`expenses/pdf_import.py`, library **pdfplumber**): every page's tables are read (ruled-line strategy first, then text-alignment strategy for statements without lines). The header is searched in the first **80** table rows (PDFs often put account details in tables too) and uses the headings rules of I3. Cells are trimmed; the lines of a wrapped narration are joined with a space, **except** when both sides of the break look like parts of one reference (each contains `/` or `-`, or the line ends in one), which banks break mid-word (`UPI/R1/SWIGGY/OK` + `AXIS/order` → `UPI/R1/SWIGGY/OKAXIS/order`). The header row is found with the same alias detection as CSVs (I3); a header **repeated** on later pages is dropped; a row whose date cell is empty is a **continuation** of the previous row's description and is joined to it; blank rows are dropped. The result is CSV text (header + rows) that the user can **download**.
-- **Password**: an encrypted PDF needs its password (often the customer's date of birth or ID, as the bank's email says). It is used once, in memory, and is never stored, logged or shown in messages.
+- **Password**: an encrypted PDF needs its password (often the customer's date of birth or ID, as the bank's email says). It is never logged or shown in messages. It is stored **only** as described in I12 (remembered per account, encrypted); otherwise it is used once, in memory.
 - **Clear errors** (blocking problems in the combined preview): password needed; wrong password; **scanned** PDF (pages with no selectable text — OCR is out of scope: "download the statement again from net banking, or export it as CSV"); not a real PDF; no transaction table found.
 - **Interfaces**: the Import page accepts `.csv` and `.pdf` together, shows a password field for each PDF and a **Download as CSV** button for each converted PDF; the CLI gets `pdf-to-csv <in.pdf> <out.csv> [--password P]`, and `import-many` accepts PDFs with `--pdf-password P`.
 - **Test data**: `tools/make_synthetic.py --format pdf` writes a bank-style PDF (preamble, ruled table, several pages, optional password) with **fpdf2** (development only, not in the app image).
+
+### I12. Remembered PDF passwords (Step 20)
+
+Most bank PDFs are locked, and each bank uses the same password every month, so the password is **remembered per account** (`expenses/vault.py`):
+
+- **Saved when it worked**: a password typed for a PDF that then opened is saved for that file's account when the import is committed (never on a failed or cancelled import). The Import page has a "Remember for this account" tick box per PDF, on by default; unticked → used once and not saved.
+- **Used automatically**: when a PDF has no typed password and its account has a saved one, the saved one is tried. The preview says "Opened with the saved password for <account>". If the saved password doesn't open it (the bank changed it), the problem reads "the saved password for <account> didn't open this PDF — enter the new one"; a newly typed password replaces the saved one on import.
+- **Encrypted at rest** with Fernet (AES-128-CBC + HMAC-SHA256, library `cryptography`, already required by pdfminer). The key is a random key in a **separate file** `pdf-passwords.key` next to the database (created on first use, owner-only permissions where the OS supports it), so the database file alone (a copy, a backup) doesn't reveal the passwords. In the web version (in-memory database) the key exists only in memory. If the key file is lost, saved passwords are treated as absent (the user is asked again).
+- **Managed in Settings**: a "Saved PDF passwords" list shows the **accounts** that have one, with a Forget button each and "Forget all". The password is never displayed, exported, logged or put in an error message.
+- **CLI**: `import-many` uses saved passwords for PDFs when `--pdf-password` isn't given; `forget-password <account>` deletes one.
 
 ## 5. Categorisation
 
@@ -402,7 +412,8 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 - The container therefore needs outbound HTTPS. Without it, foreign-currency rows are rejected while INR rows import normally.
 - Logging: at INFO level and above, log only counts, IDs and timings, never descriptions, merchants or amounts. DEBUG is off by default.
 - Uploaded files are processed in memory and never written to disk. Only the parsed rows go to SQLite.
-- `data/`, `*.db` and `.env` are git-ignored and excluded by `.dockerignore`.
+- `data/`, `*.db`, `*.key` and `.env` are git-ignored and excluded by `.dockerignore`.
+- Remembered PDF passwords are encrypted, with the key in a separate file (I12).
 
 ## 10. Project structure
 
@@ -423,6 +434,7 @@ expense tracker/
     anomaly.py              # 6.1
     auth.py                 # runtime config + passphrase gate (8.1)
     exporter.py             # CSV export used by the CLI and the UI (7.1, 7.2)
+    vault.py                # I12 — encrypted, remembered PDF passwords
     __main__.py / cli.py    # 7.1
   tools/make_synthetic.py   # synthetic statement generator
   tools/hash_passphrase.py  # creates EXPENSES_PASSPHRASE_HASH (passphrase read without echo)
@@ -435,7 +447,7 @@ expense tracker/
 
 ## 11. Dependencies (pinned in requirements.txt)
 
-- Runtime: `streamlit` (which brings `pandas` and `altair`).
+- Runtime: `streamlit` (which brings `pandas` and `altair`), `pdfplumber` (Step 17), `cryptography` (pinned in Step 20; already required by pdfminer, used directly by `vault.py`).
 - Dev: `pytest`, `pytest-cov`, `ruff`.
 - Nothing else without asking.
 
@@ -568,6 +580,10 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-101** A headerless debit/credit file **without** a balance column assumes left = debit and reports `balance_checked` false so the preview asks the user to check.
 - **AC-102** `column_roles` overrides the guess (e.g. swapping debit and credit flips the signs); roles missing a date, a description or an amount are a blocking problem.
 - **AC-103** A headerless PDF converts (header inserted) and imports; its downloadable CSV starts with the inserted heading row. A file whose columns can't be inferred gives the "no heading row" error.
+- **AC-105** `vault`: save/get round-trips per account; the database column holds no plaintext; a different key (lost key file) reads as absent; forget and forget-all delete; the key file is created once and reused; in-memory databases use an in-memory key.
+- **AC-106** `combine.preview` uses an account's saved password when none is typed and reports `used_saved_password`; a wrong saved password gives the "saved password … didn't open" problem; a typed password that opened the PDF is saved on `commit` (when `remember` is true) and replaces an old one; unticked or failed imports save nothing; no message or log contains a password.
+- **AC-107** CLI: `import-many` opens a PDF with the saved password; `forget-password` removes it (exit 0; unknown account → exit 1).
+- **AC-108** Manual check: in the browser, the password is typed once, the import works, and a second upload for the same account opens without typing; Settings lists the account and Forget removes it (recorded in the learning log).
 - **AC-104** Manual check: in the browser, a headerless statement shows "Columns guessed", the role dropdowns change the result, and the import works (recorded in the learning log).
 - **AC-56** Export adds `Original Currency` and `Original Amount` columns. A USD row survives a round trip: after re-import the INR amounts are identical, and the exported original columns read `USD` and `-12.34`.
 
@@ -594,6 +610,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 17 | PDF statements: convert to CSV (password-protected too) and import | AC-88 – AC-93 |
 | 18 | Robust column detection for real bank layouts (CSV and PDF) | AC-94 – AC-98 |
 | 19 | Statements without a heading row: inferred columns, balance check, user correction | AC-99 – AC-104 |
+| 20 | Remember PDF passwords per account (encrypted) | AC-105 – AC-108 |
 
 Rebuild the container after every step.
 
@@ -660,6 +677,7 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | Category chart colours switched to a validated 8-hue palette; other categories fold into "Other" | The old Tailwind colours failed the colour check (Transport blue vs Education indigo: ΔE 7.2, below the 15 floor even for full colour vision) |
 | 2026-10-13 | **PDF statements** (owner's request): new runtime dependency **pdfplumber 0.11.10** (pulls pdfminer.six, pypdfium2, Pillow) and dev-only **fpdf2 2.8.9** for synthetic PDFs — both approved by the owner | pdfplumber reads tables cell by cell (pypdf only gives raw text, which would misplace columns); fpdf2 lets tests use synthetic PDFs, never real statements |
 | 2026-10-13 | Scanned PDFs get a clear message instead of OCR (owner's choice) | OCR needs a ~100 MB engine, is slow, misreads digits in amounts, and can't run on the web version |
+| 2026-10-15 | **PDF passwords remembered per account, encrypted** (owner's choice over a single password box and over plain storage); `cryptography` pinned (owner approved; already installed via pdfminer) | Banks reuse the same password monthly; encryption with a separate key file keeps a copied database from revealing them |
 | 2026-10-13 | **Headerless statements** (the owner's bank exports have no heading row): columns inferred from content, debit/credit orientation proved by the running balance, and the user can correct every column in the preview | Guessing alone could silently flip spends and income; the balance arithmetic makes it checkable, and the dropdowns make it fixable |
 | 2026-10-13 | Wrapped narrations: no space is inserted when both sides of the break are parts of one reference | Found while testing the bank layouts: narrow PDF columns break UPI references mid-word; a space would make the PDF and CSV of the same period disagree, so duplicates would be missed |
 | 2026-10-13 | **Column detection made robust** (owner's real PDF failed with "no transaction table found"): normalised headings, more names + keyword fallback, transaction date over value date, two-row headings, Dr/Cr indicator column, 80-row search in PDFs, error lists the headings seen | The owner's statement can't be shared (privacy rule), so the common Indian layouts were covered and the error now reports headings (never values) for anything still unsupported |

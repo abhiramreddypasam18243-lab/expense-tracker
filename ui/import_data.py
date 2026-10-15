@@ -5,7 +5,7 @@ import hashlib
 import pandas as pd
 import streamlit as st
 
-from expenses import auth, combine, db
+from expenses import auth, combine, db, vault
 from expenses.columns import ROLE_NAMES
 from expenses.importer import undo_import
 from expenses.money import format_inr
@@ -181,6 +181,7 @@ else:
         if uploads:
             st.markdown("**Which account is each file?** Pick one you've used before or type a new name.")
             inputs = []
+            saved_passwords = set(vault.accounts(conn))
             for up in uploads:
                 data = up.getvalue()
                 pdf = is_pdf(data)
@@ -199,21 +200,39 @@ else:
                     key=f"account-{up.file_id}",
                     label_visibility="collapsed",
                 )
-                password = None
-                if pdf:  # used once, in memory; never stored or logged
+                password, remember = None, True
+                if (
+                    pdf
+                ):  # never logged; remembered per account, encrypted, only after a successful import (I12)
+                    has_saved = bool(account) and account in saved_passwords
                     password = (
                         account_col.text_input(
                             f"PDF password for {up.name}",
                             type="password",
                             key=f"pdf-password-{up.file_id}",
-                            placeholder="PDF password, if it has one (often your date of birth or customer ID)",
+                            placeholder=(
+                                f"Saved password for {account} will be used — type only if it changed"
+                                if has_saved
+                                else "PDF password, if it has one (often your date of birth or customer ID)"
+                            ),
                             label_visibility="collapsed",
                         )
                         or None
                     )
+                    remember = account_col.checkbox(
+                        "Remember for this account",
+                        value=True,
+                        key=f"pdf-remember-{up.file_id}",
+                        help="Stored encrypted on this computer. Manage in Settings → PDF passwords.",
+                    )
                 inputs.append(
                     combine.StatementInput(
-                        data, account or "", up.name, password=password, column_roles=chosen_roles(up.file_id)
+                        data,
+                        account or "",
+                        up.name,
+                        password=password,
+                        remember=remember,
+                        column_roles=chosen_roles(up.file_id),
                     )
                 )
 
@@ -224,6 +243,7 @@ else:
                     up.file_id,
                     i.account,
                     hashlib.sha256((i.password or "").encode()).hexdigest(),
+                    i.remember,
                     tuple(sorted((i.column_roles or {}).items())),
                 )
                 for up, i in zip(uploads, inputs, strict=True)
@@ -238,6 +258,11 @@ else:
             confirmed = show_combined_preview(plan)
             for up, f in zip(uploads, plan.files, strict=True):
                 show_column_guess(up.file_id, f)
+            for f in plan.files:
+                if f.used_saved_password:
+                    st.caption(
+                        f":material/key: {f.source_name}: opened with the saved password for {f.account}."
+                    )
             for f in plan.files:  # every converted PDF can be downloaded as CSV (I10)
                 if f.converted_csv is not None:
                     st.download_button(

@@ -10,7 +10,7 @@ import logging
 import sys
 from collections.abc import Sequence
 
-from expenses import categorize, combine, db, exporter, insights, recurring
+from expenses import categorize, combine, db, exporter, insights, recurring, vault
 from expenses.anomaly import find_anomalies
 from expenses.importer import HeaderNotFoundError, import_file, undo_import
 from expenses.money import format_inr
@@ -43,6 +43,12 @@ def cmd_import(conn, args) -> None:
         print(f"  line {line}: {reason}")
     if report.rows_imported:
         print(f"Undo with: python -m expenses undo-import {report.batch_id}")
+
+
+def cmd_forget_password(conn, args) -> None:
+    if not vault.forget(conn, args.account):
+        raise UserError(f"no saved PDF password for account {args.account!r}")
+    print(f"Forgot the saved PDF password for {args.account}.")
 
 
 def cmd_import_many(conn, args) -> None:
@@ -211,8 +217,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("files", nargs="+", metavar="FILE=ACCOUNT")
     p.add_argument("--yes", action="store_true", help="really import (without it: preview only)")
     p.add_argument("--no-transfers", action="store_true", help="don't mark transfer pairs")
-    p.add_argument("--pdf-password", help="password for password-protected PDF statements")
+    p.add_argument(
+        "--pdf-password",
+        help="password for locked PDFs (remembered per account; saved ones are used if omitted)",
+    )
     p.set_defaults(func=cmd_import_many)
+
+    p = sub.add_parser("forget-password", help="forget the saved PDF password of an account")
+    p.add_argument("account")
+    p.set_defaults(func=cmd_forget_password)
 
     p = sub.add_parser("pdf-to-csv", help="convert a PDF bank statement to CSV")
     p.add_argument("pdf")

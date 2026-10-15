@@ -36,6 +36,7 @@ class PdfConversion:
     pages: int
     rows: int
     inferred: Inference | None = None  # set when the table had no heading row (I11)
+    encrypted: bool = False  # the PDF is password-protected (I12)
 
 
 def is_pdf(data: bytes) -> bool:
@@ -83,17 +84,18 @@ def _clean(cell: object) -> str:
     return text
 
 
-def _read_rows(data: bytes, password: str | None) -> tuple[int, int, list[list[str]]]:
-    """(pages, characters of text, table rows) — raises PdfImportError for unreadable files."""
+def _read_rows(data: bytes, password: str | None) -> tuple[int, int, list[list[str]], bool]:
+    """(pages, characters of text, table rows, encrypted) — raises PdfImportError for unreadable files."""
     try:
         with pdfplumber.open(io.BytesIO(data), password=password or "") as pdf:
+            encrypted = getattr(pdf.doc, "encryption", None) is not None
             text_chars, rows = 0, []
             for page in pdf.pages:
                 text_chars += len((page.extract_text() or "").strip())
                 tables = page.extract_tables() or page.extract_tables(TEXT_TABLE_SETTINGS)
                 for table in tables:
                     rows += [[_clean(cell) for cell in row] for row in table]
-            return len(pdf.pages), text_chars, rows
+            return len(pdf.pages), text_chars, rows, encrypted
     except Exception as exc:  # noqa: BLE001 — pdfplumber/pdfminer raise many types; map them to messages
         if _is_password_error(exc):
             if password:
@@ -110,7 +112,7 @@ def _read_rows(data: bytes, password: str | None) -> tuple[int, int, list[list[s
 def pdf_to_csv(data: bytes, password: str | None = None) -> PdfConversion:
     if not is_pdf(data):
         raise PdfImportError("this is not a PDF file")
-    pages, text_chars, rows = _read_rows(data, password)
+    pages, text_chars, rows, encrypted = _read_rows(data, password)
     if text_chars < MIN_TEXT_CHARS:
         raise PdfImportError(
             "this looks like a scanned PDF, so its text can't be read — download the statement again from "
@@ -148,4 +150,4 @@ def pdf_to_csv(data: bytes, password: str | None = None) -> PdfConversion:
     buf = io.StringIO()
     csv.writer(buf, lineterminator="\n").writerows(out)
     log.info("pdf converted pages=%d rows=%d", pages, len(out) - 1)  # counts only (privacy rule)
-    return PdfConversion(buf.getvalue(), pages, len(out) - 1, inferred)
+    return PdfConversion(buf.getvalue(), pages, len(out) - 1, inferred, encrypted)
