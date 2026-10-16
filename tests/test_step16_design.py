@@ -126,3 +126,34 @@ def test_ac_86_every_page_renders(app_env, mode, colour):
     for page in PAGES:
         at = run(page)
         assert theme.tokens(colour)["--bg"] in html_of(at)  # the right token set was injected
+
+
+# --- AC-109 theme follows the ⋮ menu without a rerun (Step 21) ------------------------------------------
+
+
+def test_ac_109_css_uses_light_dark_tokens():
+    light, dark = theme.tokens("light"), theme.tokens("dark")
+    css = theme.css("light")
+    assert css == theme.css("dark")  # the injected stylesheet no longer depends on the detected mode
+    assert "color-scheme" not in css  # Streamlit's own choice decides
+    for name in light:
+        line = next(line for line in css.splitlines() if line.strip().startswith(f"{name}:"))
+        if light[name] == dark[name]:
+            assert light[name] in line
+        else:
+            assert "light-dark(" in line, name
+    assert f"--bg: light-dark({light['--bg']}, {dark['--bg']})" in css
+    shadow = next(line for line in css.splitlines() if line.strip().startswith("--shadow:"))
+    assert shadow.count("light-dark(") == 2  # each colour inside the shadow adapts
+
+
+def test_ac_111_theme_sync_script_and_hidden_button(app_env):
+    from ui import style
+
+    app_env("seeded", "dark")
+    at = run(PAGES[0])
+    assert any(b.key == f"{style.SYNC_KEY}-button" for b in at.button)
+    page = html_of(at)
+    assert 'const drawn = "dark"' in page and "__etThemeAsked" in page  # asks once per switch
+    assert ".st-key-theme-sync, div:has(> .st-key-theme-sync) { display: none" in page
+    assert "fetch(" not in style.THEME_SYNC_JS and "http" not in style.THEME_SYNC_JS  # no network

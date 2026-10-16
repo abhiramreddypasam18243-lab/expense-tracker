@@ -491,3 +491,27 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why is the key stored in a separate file instead of in the database next to the encrypted passwords?
 2. Why is the password saved inside the same `with conn:` transaction as the imported rows?
 3. What happens when the bank changes the PDF password, step by step?
+
+## Step 21 — Theme switching without a rerun (AC-109 to AC-111) — 2026-10-16
+
+**Why**: the owner reported "dark UI is working but light UI is not working". Reproduced on the deployed app: switching ⋮ → Light while the computer was in dark mode turned Streamlit's own widgets light but left the app's cards, background and charts dark — a broken mix.
+
+**Cause**: the app chose its colours in Python (`st.context.theme`) when the page ran, and Streamlit does **not** rerun the script when the theme is switched in the ⋮ menu (Streamlit issue #11920). The app also forced `color-scheme` on the page root.
+
+**What was built**
+1. `ui/theme.css()` writes every token as CSS `light-dark(<light>, <dark>)` (shadows: each colour inside them) and no longer sets `color-scheme`. Streamlit sets `color-scheme` on the app for the chosen theme, so the browser switches backgrounds, cards and text **instantly**.
+2. `ui/style.py` adds a tiny self-contained script (via `st.html(..., unsafe_allow_javascript=True)`; no network, no storage) and a hidden button. When the app's colour scheme no longer matches the mode the charts were drawn with, it clicks the button **once**, which reruns the page so charts, sparklines and category colours follow. It also fixes a wrong theme guess on first load.
+
+**Manual check (AC-110)**: in a browser, Light, Dark → Light and Light → Dark all gave fully consistent pages including the donut, bars and sparklines, without any click; page spacing unchanged (the hidden button's wrapper is hidden too).
+
+**Why it is designed this way**
+- CSS can react to the theme the instant it changes; Python can only react on a rerun. So everything CSS can do is done in CSS, and the rerun is only needed for what Python draws.
+- "Ask once per switch" (`__etThemeAsked`) guarantees the script can never cause an endless rerun loop, even if Streamlit reported a stale theme.
+
+**One thing that could go wrong**
+- `light-dark()` needs a 2024+ browser (Chrome 123, Firefox 120, Safari 17.5); older browsers would fall back to Streamlit's defaults for those colours.
+
+**Quiz questions**
+1. Why did switching the theme in the ⋮ menu leave the cards dark, while the dropdowns turned light?
+2. How does `light-dark()` inside a CSS variable defined on `:root` pick the right colour for an element inside the app?
+3. What stops the theme-sync script from rerunning the page forever?

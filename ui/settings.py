@@ -20,7 +20,9 @@ def dot_color(name: str, stored: str) -> str:
 
 
 page_header(
-    "Settings", "Tune categories and rules, set monthly budgets, and manage saved PDF passwords.", eyebrow_text="Preferences"
+    "Settings",
+    "Tune categories and rules, set monthly budgets, and manage saved PDF passwords.",
+    eyebrow_text="Preferences",
 )
 
 categories = categorize.list_categories(conn)

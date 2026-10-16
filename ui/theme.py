@@ -1,10 +1,14 @@
 """Design tokens, chart colours and the global stylesheet (spec 7.2 "Visual design system").
 
-One set of token names with light and dark values; the active Streamlit theme picks which set
-is injected. Everything visual (cards, KPI tiles, charts) reads these tokens.
+One set of token names with light and dark values. The stylesheet writes each colour as CSS
+`light-dark(light, dark)`, so it follows Streamlit's theme instantly — also when the viewer
+switches it in the ⋮ menu, which doesn't rerun the script. Python-drawn colours (charts) use
+current() and catch up on the next rerun.
 """
 
 from __future__ import annotations
+
+import re
 
 import streamlit as st
 
@@ -103,6 +107,7 @@ _RULES = """
 [data-testid="stHeader"] { background: transparent !important; }
 [data-testid="stMainBlockContainer"] { max-width: 1240px; padding-top: 2.2rem; padding-bottom: 4rem; }
 [data-testid="stAppDeployButton"] { display: none; }
+.st-key-theme-sync, div:has(> .st-key-theme-sync) { display: none !important; }  /* hidden rerun button (ui/style.py) */
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 /* ---- headings ------------------------------------------------------------------------------ */
@@ -246,6 +251,28 @@ _RULES = """
 """
 
 
-def css(mode: str) -> str:
-    variables = "\n".join(f"  {name}: {value};" for name, value in tokens(mode).items())
-    return f"<style>\n:root {{\n{variables}\n  color-scheme: {mode};\n}}\n{_RULES}</style>"
+_COLOUR = re.compile(r"#[0-9A-Fa-f]{3,8}\b|rgba?\([^)]*\)")
+
+
+def _adaptive(light: str, dark: str) -> str:
+    """One CSS value for both modes: light-dark() around each colour that differs.
+
+    Shadows keep the light geometry, with each of their colours adapting.
+    """
+    if light == dark:
+        return light
+    if _COLOUR.fullmatch(light) and _COLOUR.fullmatch(dark):
+        return f"light-dark({light}, {dark})"
+    if len(_COLOUR.findall(light)) != len(_COLOUR.findall(dark)):
+        return light
+    dark_colours = iter(_COLOUR.findall(dark))
+    return _COLOUR.sub(lambda m: f"light-dark({m.group(0)}, {next(dark_colours)})", light)
+
+
+def css(mode: str | None = None) -> str:
+    """The global stylesheet. It adapts to both themes by itself; `mode` is accepted for old callers.
+
+    No `color-scheme` is set here: Streamlit sets it on the app for the theme the viewer chose.
+    """
+    variables = "\n".join(f"  {name}: {_adaptive(LIGHT[name], DARK[name])};" for name in LIGHT)
+    return f"<style>\n:root {{\n{variables}\n}}\n{_RULES}</style>"
