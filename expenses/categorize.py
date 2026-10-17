@@ -1,16 +1,17 @@
 """Keyword-rule categorisation (spec section 5).
 
 Rules are tried in ascending priority (then id); the first rule whose pattern is a
-substring of the normalised description wins. No match -> Uncategorised.
-Manual choices (category_source = 'manual') are never overwritten by rules.
+substring of the normalised description wins. No match -> the learned model's suggestion when
+it is confident enough (spec 5.1, `expenses/learn.py`) -> Uncategorised.
+Manual choices (category_source = 'manual') are never overwritten by rules or the model.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
-from expenses import db
+from expenses import db, learn
 
 UNCATEGORISED = "Uncategorised"
 
@@ -128,22 +129,43 @@ def match_category(description_norm: str, rules: Iterable[Mapping]) -> int | Non
 
 
 def categorize(description_norm: str, rules: Iterable[Mapping], fallback_id: int) -> tuple[int, str]:
-    """-> (category_id, category_source) for a new row."""
+    """-> (category_id, category_source) from rules only."""
     found = match_category(description_norm, rules)
     return (found, "rule") if found is not None else (fallback_id, "default")
 
 
+def classify(
+    description_norm: str,
+    amount_minor: int,
+    rules: Iterable[Mapping],
+    fallback_id: int,
+    predictor: Callable[[str, int], tuple[int, float] | None] | None = None,
+) -> tuple[int, str, float | None]:
+    """-> (category_id, category_source, confidence): rule, else model (if confident), else default."""
+    found = match_category(description_norm, rules)
+    if found is not None:
+        return found, "rule", None
+    if predictor is not None:
+        suggestion = predictor(description_norm, amount_minor)
+        if suggestion is not None:
+            return suggestion[0], "model", round(suggestion[1], 4)
+    return fallback_id, "default", None
+
+
 def recategorize(conn: sqlite3.Connection) -> int:
-    """Re-run rules on every non-manual row. Returns how many rows changed category."""
+    """Re-run rules (and the model, if on) on every non-manual row. Returns how many rows changed."""
     rules = db.list_rules(conn)
     fallback = uncategorised_id(conn)
+    predictor = learn.predictor(conn)  # trained on manual + rule labels only, before anything changes
     changed = 0
     with conn:
         for row in db.list_non_manual_rows(conn):
-            new_id, source = categorize(row["description_norm"], rules, fallback)
+            new_id, source, confidence = classify(
+                row["description_norm"], row["amount_minor"], rules, fallback, predictor
+            )
             if new_id != row["category_id"]:
                 changed += 1
-            db.set_transaction_category(conn, row["id"], new_id, source)
+            db.set_transaction_category(conn, row["id"], new_id, source, confidence)
     return changed
 
 

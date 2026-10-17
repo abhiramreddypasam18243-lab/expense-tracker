@@ -10,7 +10,16 @@ from expenses.money import format_inr
 from ui.common import card, get_conn, month_label, no_transactions_state, page_header
 
 ALL = "All"
-SOURCE_LABEL = {"rule": "Rule", "manual": "You", "default": "—"}
+SOURCE_LABEL = {"rule": "Rule", "manual": "You", "default": "—", "model": "Model"}
+
+
+def set_by(row) -> str:
+    """'Model · 87%' for a learned suggestion (spec 5.1), else Rule / You / —."""
+    if row["category_source"] == "model" and row["category_confidence"] is not None:
+        confidence = row["category_confidence"]
+        return "Model · 99%+" if confidence >= 0.995 else f"Model · {round(confidence * 100)}%"
+    return SOURCE_LABEL[row["category_source"]]
+
 
 conn = get_conn()
 page_header(
@@ -82,7 +91,7 @@ df = pd.DataFrame(
         "Description": [r["description"] for r in rows],
         "Merchant": [r["merchant"] or "" for r in rows],
         "Category": [r["category_name"] for r in rows],
-        "Set by": [SOURCE_LABEL[r["category_source"]] for r in rows],
+        "Set by": [set_by(r) for r in rows],
         "Amount": [format_inr(r["amount_minor"]) for r in rows],
         "Account": [r["account"] for r in rows],
     }
@@ -104,7 +113,10 @@ edited = table_card.data_editor(
         "Description": st.column_config.TextColumn(width=250),
         "Merchant": st.column_config.TextColumn(width=120),
         "Category": st.column_config.SelectboxColumn(options=list(category_ids), required=True, width=150),
-        "Set by": st.column_config.TextColumn(width=70, help="Rule = automatic, You = your manual choice"),
+        "Set by": st.column_config.TextColumn(
+            width=100,
+            help="Rule = a keyword rule · Model = smart categories (with its confidence) · You = your choice",
+        ),
         "Amount": st.column_config.TextColumn(width=115, alignment="right"),
         "Account": st.column_config.TextColumn(width=110),
     },
@@ -118,4 +130,7 @@ if not changed.empty:
     st.toast(f"Updated {len(changed)} categor{'y' if len(changed) == 1 else 'ies'}", icon=":material/check:")
     st.rerun()
 
-table_card.caption("Tip: click a Category cell to change it. Use Settings → Rules to fix many rows at once.")
+table_card.caption(
+    "Tip: click a Category cell to change it — smart categories learn from your changes. "
+    "Use Settings → Rules to fix many rows at once."
+)

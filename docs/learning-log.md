@@ -515,3 +515,29 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 1. Why did switching the theme in the ⋮ menu leave the cards dark, while the dropdowns turned light?
 2. How does `light-dark()` inside a CSS variable defined on `:root` pick the right colour for an element inside the app?
 3. What stops the theme-sync script from rerunning the page forever?
+
+## Step 22 — Learned categorisation (AC-112 to AC-117) — 2026-10-17
+
+**Why**: rules only know merchants someone wrote a rule for; every new merchant landed in Uncategorised, and correcting it by hand taught the app nothing.
+
+**What was built**
+- `expenses/learn.py`: a text classifier that suggests a category **when no rule matches**. Order: your manual choice → rule → model (only if confident enough) → Uncategorised.
+- Training data = your manual labels (weight 3) + rule labels (weight 1). The model **never trains on its own predictions**, so it can't reinforce its mistakes.
+- Features: TF-IDF word 1–2-grams + character 3–5-grams of the narration with digits and payment-channel words (UPI, POS, OKAXIS …) removed, plus a debit/credit marker. Domain constraint: debits only get expense/transfer categories, credits only income/transfer.
+- Classifier: **Complement Naive Bayes**, chosen by comparing it with logistic regression and a calibrated linear SVM over 10 synthetic benchmarks (`docs/model-evaluation.md`).
+- Evaluation with a **merchant-grouped split**: no merchant is in both train and test, so the score measures merchants the model has never seen. Also: per-category precision/recall, confusion matrix, threshold trade-off table and learning curve.
+- Settings → **Smart categories** (on/off, confidence slider, scores on your own data), "Model · NN%" in the Transactions table, `python -m expenses model-report`, `tools/evaluate_model.py`.
+- Database schema version 2 (new source `model`, `category_confidence`, `app_settings`), migrated in place for existing databases.
+
+**Results (synthetic benchmark, seed 7)**: 77 % right on unseen merchants when forced to guess; at the default threshold 0.60 it labels ~79 % of rows and ~98 % of those are right. Split by cause: **100 %** right when the merchant's category word appeared in training, 0 % for words it never saw, 0 % for deliberately ambiguous names.
+
+**Manual check (AC-117)**: in the browser, Settings → Smart categories showed the scores; importing a statement with new merchants gave Biryani House → Food, Pharma → Health, Fuel Station → Transport (all "Model"), Swiggy stayed "Rule", and "TEA STALL" (a word never seen) stayed Uncategorised. In Python, one hand correction of the tea stall made the next tea stall come out as Food & Dining at 97 %. (The correction itself was done through the core function, not by clicking the table.)
+
+**Why it is designed this way**
+- *Merchant-grouped split*: a random split puts the same merchant in train and test, so the model just memorises names and the score looks unrealistically high.
+- *Never train on its own output*: otherwise one wrong guess becomes "evidence" for the next.
+- *Threshold, not forced guesses*: a wrong category silently skews budgets and insights; Uncategorised is honest and quick to fix.
+- *Why not one accuracy number*: the error analysis showed every remaining mistake was a word never seen in training or an ambiguous name, so reporting known vs new vocabulary explains the number instead of hiding it.
+
+**One thing that could go wrong**
+- Naive Bayes is over-confident: probabilities near 1.0 are common, so the threshold mostly separates "seen this kind of word" from "never seen it", rather than giving a finely calibrated probability. The table shows these as "99%+".

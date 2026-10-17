@@ -17,7 +17,7 @@ from datetime import date
 from decimal import Decimal
 from itertools import zip_longest
 
-from expenses import categorize, db, fx
+from expenses import categorize, db, fx, learn
 from expenses.dates import DateParseError, parse_date
 from expenses.fingerprint import OccurrenceCounter, fingerprint
 from expenses.money import MoneyParseError, parse_amount, parse_debit_credit
@@ -409,6 +409,7 @@ def prepare_file(
     rules: list,
     fallback_category: int,
     column_roles: dict[str, int] | None = None,
+    predictor=None,
 ) -> PreparedFile:
     """Parse, normalise, fingerprint and categorise one statement (I1-I5, I8). No database writes,
     except caching exchange rates. Without a heading row (or with `column_roles` chosen by the user)
@@ -456,8 +457,8 @@ def prepare_file(
         )
         parsed["fingerprint"] = fingerprint(*key, counter.next(*key))
         parsed["txn_date"] = parsed["txn_date"].isoformat()
-        parsed["category_id"], parsed["category_source"] = categorize.categorize(
-            parsed["description_norm"], rules, fallback_category
+        parsed["category_id"], parsed["category_source"], parsed["category_confidence"] = categorize.classify(
+            parsed["description_norm"], parsed["amount_minor"], rules, fallback_category, predictor
         )
         parsed["account"] = account
         parsed["line"] = line
@@ -476,10 +477,16 @@ def insert_rows(conn: sqlite3.Connection, batch_id: int, rows: list[dict]) -> tu
     return imported, duplicate
 
 
-def import_context(conn: sqlite3.Connection, fetch_rate: FetchRate) -> tuple[RateLookup, list, int]:
-    """Rules, fallback category and rate lookup shared by every file of one import."""
+def import_context(conn: sqlite3.Connection, fetch_rate: FetchRate) -> tuple[RateLookup, list, int, object]:
+    """Rate lookup, rules, fallback category and the learned predictor (or None), shared by every
+    file of one import."""
     categorize.seed_defaults(conn)  # before any `with conn:` — it commits on its own
-    return RateLookup(conn, fetch_rate), categorize.list_rules(conn), categorize.uncategorised_id(conn)
+    return (
+        RateLookup(conn, fetch_rate),
+        categorize.list_rules(conn),
+        categorize.uncategorised_id(conn),
+        learn.predictor(conn),
+    )
 
 
 def import_csv(
@@ -493,8 +500,8 @@ def import_csv(
 
     The whole file is one database transaction: either all valid rows land or none do.
     """
-    rates, rules, fallback = import_context(conn, fetch_rate)
-    prepared = prepare_file(conn, text, account, source_name, rates, rules, fallback)
+    rates, rules, fallback, predictor = import_context(conn, fetch_rate)
+    prepared = prepare_file(conn, text, account, source_name, rates, rules, fallback, predictor=predictor)
     with conn:
         batch_id = db.create_batch(conn, source_name=prepared.source_name, account=prepared.account)
         imported, duplicate = insert_rows(conn, batch_id, prepared.rows)

@@ -207,6 +207,25 @@ Most bank PDFs are locked, and each bank uses the same password every month, so 
 - **Manual override**: the user can set a transaction's category, which stores `category_source = manual`. **"Re-run rules"** recategorises only rows whose source is not `manual`.
 - Users can add, edit and delete rules and categories. Deleting a category moves its transactions to Uncategorised.
 
+### 5.1 Learned categorisation (Step 22)
+
+A text classifier (`expenses/learn.py`, library **scikit-learn**) suggests a category when **no rule matches**.
+
+- **Order**: manual choice (never touched) → rule → model → Uncategorised. Rules always win over the model.
+- **Training data**: transactions whose category was set **by hand** (`manual`, weight 3) or **by a rule** (`rule`, weight 1), excluding Uncategorised. Rows the model labelled itself (`model`) are **never** used for training, so it can't reinforce its own mistakes. Categories with fewer than 3 examples are left out. The model needs at least 20 examples in at least 2 categories; otherwise it is "not ready" and nothing changes.
+- **Features**: the normalised description with digits and payment-channel noise removed (`UPI`, `POS`, `IMPS`, `NEFT`, handles like `OKAXIS`/`YBL`), as TF-IDF **word 1–2-grams** plus **character 3–5-grams** (these catch shortened or misspelt merchant names), plus a debit/credit marker. Classifier: **Complement Naive Bayes** — chosen over class-balanced logistic regression and a calibrated linear SVM by a 10-benchmark comparison (similar accuracy; the most rows labelled at the default threshold with comparable precision; the fastest). The comparison is in `docs/model-evaluation.md`.
+- **Domain constraint**: a debit can only get an expense or transfer category, a credit only an income or transfer category; the other categories' probabilities are set to 0 and the rest re-normalised.
+- **Confidence threshold** (default 0.60, adjustable 0.40–0.95 in Settings): below it the row stays Uncategorised. Accepted suggestions are stored with `category_source = model` and `category_confidence` (0–1), shown as "Model · 87%".
+- **When**: on import (preview and commit), and on "Re-run rules" (now "Re-run rules and model"), for rows that are not manual. Training is automatic and in memory (under a second for thousands of rows); the trained model is cached until the labelled data changes. Nothing is written to disk except the predictions; no network.
+- **On/off**: a Settings switch (default on). Off → behaves exactly as before Step 22 (rows already labelled `model` are reset to Uncategorised by the next "Re-run").
+- **Evaluation** (`learn.evaluate`), shown in Settings → **Smart categories** and printed by `python -m expenses model-report`:
+  - a **merchant-grouped split** (75 % / 25 %, fixed seed): no merchant appears in both train and test, so the score measures what matters — categorising **merchants never seen before**;
+  - accuracy, macro-F1, per-category precision / recall / support, and a confusion matrix;
+  - a **threshold table**: for each threshold, the share of test rows the model would label (coverage) and the accuracy of those labels;
+  - a **learning curve**: accuracy after 10, 25, 50, 100, 200, … training examples.
+- **Synthetic benchmark**: `tools/make_synthetic.py` also generates a labelled set of invented merchants whose names carry category words (CAFE, KIRANA, PHARMA, PETROL …) plus ~10 % deliberately ambiguous names; `tools/evaluate_model.py` writes `docs/model-evaluation.md` from it. Real-data accuracy can differ; the Settings tab always reports the score on the user's own data.
+- **Schema change (version 2)**: `category_source` also allows `model`; new column `transactions.category_confidence REAL`; new table `app_settings(key, value)`. Version-1 databases are migrated in place on open (table rebuild inside one transaction; data, ids and fingerprints unchanged).
+
 ## 6. Insights
 
 ### 6.1 Anomaly detection — modified z-score [LEARN]
@@ -435,6 +454,7 @@ expense tracker/
     auth.py                 # runtime config + passphrase gate (8.1)
     exporter.py             # CSV export used by the CLI and the UI (7.1, 7.2)
     vault.py                # I12 — encrypted, remembered PDF passwords
+    learn.py                # 5.1 — learned categorisation + evaluation
     __main__.py / cli.py    # 7.1
   tools/make_synthetic.py   # synthetic statement generator
   tools/hash_passphrase.py  # creates EXPENSES_PASSPHRASE_HASH (passphrase read without echo)
@@ -447,7 +467,7 @@ expense tracker/
 
 ## 11. Dependencies (pinned in requirements.txt)
 
-- Runtime: `streamlit` (which brings `pandas` and `altair`), `pdfplumber` (Step 17), `cryptography` (pinned in Step 20; already required by pdfminer, used directly by `vault.py`).
+- Runtime: `streamlit` (which brings `pandas` and `altair`), `pdfplumber` (Step 17), `cryptography` (pinned in Step 20; already required by pdfminer, used directly by `vault.py`), `scikit-learn` (Step 22, owner approved; brings `scipy`, `joblib`, `threadpoolctl`).
 - Dev: `pytest`, `pytest-cov`, `ruff`.
 - Nothing else without asking.
 
@@ -585,6 +605,12 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-107** CLI: `import-many` opens a PDF with the saved password; `forget-password` removes it (exit 0; unknown account → exit 1).
 - **AC-108** Manual check: in the browser, the password is typed once, the import works, and a second upload for the same account opens without typing; Settings lists the account and Forget removes it (recorded in the learning log).
 - **AC-109** `ui.theme.css()` defines every token that differs between light and dark with `light-dark(<light>, <dark>)` (shadows: each colour inside them), never sets `color-scheme` itself, and is the same whatever mode is passed in.
+- **AC-112** A version-1 database is migrated on open: rows, ids and fingerprints unchanged, `category_source = 'model'` and `category_confidence` accepted, `app_settings` exists, `user_version = 2`; opening again is a no-op.
+- **AC-113** On the synthetic labelled set (seed 7), for **unseen** merchants whose category word appeared in some training merchant, accuracy ≥ 0.95; at the default threshold the labelled rows are ≥ 0.90 correct; a name with a category word ("ROYAL LOTUS BIRYANI HOUSE") gets that category with confidence ≥ the threshold; a credit never gets an expense category and a debit never an income one.
+- **AC-114** Import and "Re-run": a no-rule row gets the model's category with `source = model` and its confidence; a rule match still wins; manual rows are never changed; rows below the threshold stay Uncategorised; `model` rows are not training data; with the switch off, or fewer than 20 examples, no row gets `model`.
+- **AC-115** `learn.evaluate`: no merchant is in both train and test; it reports accuracy, macro-F1, per-category precision/recall/support and a confusion matrix; coverage falls as the threshold rises; the learning curve ends at the full training size; too little data returns "not enough data" instead of failing.
+- **AC-116** `python -m expenses model-report` prints the evaluation (exit 0) and says when there is not enough data; no log line contains a description or merchant.
+- **AC-117** Manual check: in the browser, Settings → Smart categories shows the scores; a transaction from an unseen merchant is labelled "Model · NN%" after import; correcting it by hand changes the next suggestion for similar merchants (recorded in the learning log).
 - **AC-111** `ui.style.inject()` adds the hidden rerun button and the theme-sync script with the mode this run drew with; the script asks for at most one rerun per switch.
 - **AC-110** Manual check: on the deployed web app and locally, switching the ⋮ menu Dark → Light and Light → Dark gives a fully consistent page (backgrounds, cards, text, sidebar), and charts, sparklines and category colours follow by themselves within a moment, without a click (recorded in the learning log).
 - **AC-104** Manual check: in the browser, a headerless statement shows "Columns guessed", the role dropdowns change the result, and the import works (recorded in the learning log).
@@ -614,7 +640,8 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 18 | Robust column detection for real bank layouts (CSV and PDF) | AC-94 – AC-98 |
 | 19 | Statements without a heading row: inferred columns, balance check, user correction | AC-99 – AC-104 |
 | 20 | Remember PDF passwords per account (encrypted) | AC-105 – AC-108 |
-| 21 | Theme switching without a rerun (light-dark tokens) | AC-109 – AC-110 |
+| 21 | Theme switching without a rerun (light-dark tokens) | AC-109 – AC-111 |
+| 22 | Learned categorisation from the user's corrections (scikit-learn) | AC-112 – AC-117 |
 
 Rebuild the container after every step.
 
@@ -681,6 +708,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | Category chart colours switched to a validated 8-hue palette; other categories fold into "Other" | The old Tailwind colours failed the colour check (Transport blue vs Education indigo: ΔE 7.2, below the 15 floor even for full colour vision) |
 | 2026-10-13 | **PDF statements** (owner's request): new runtime dependency **pdfplumber 0.11.10** (pulls pdfminer.six, pypdfium2, Pillow) and dev-only **fpdf2 2.8.9** for synthetic PDFs — both approved by the owner | pdfplumber reads tables cell by cell (pypdf only gives raw text, which would misplace columns); fpdf2 lets tests use synthetic PDFs, never real statements |
 | 2026-10-13 | Scanned PDFs get a clear message instead of OCR (owner's choice) | OCR needs a ~100 MB engine, is slow, misreads digits in amounts, and can't run on the web version |
+| 2026-10-17 | **Learned categorisation** (owner chose option #1 of the improvement plan and approved `scikit-learn`): rules first, then a TF-IDF + Complement-Naive-Bayes model with a confidence threshold; evaluated on merchants never seen in training | Turns the user's corrections into training data; the merchant-grouped split measures real generalisation instead of memorised merchant names |
+| 2026-10-17 | Classifier = Complement Naive Bayes; AC-113 measures accuracy separately for known vs new vocabulary | Over 10 benchmarks the three classifiers were within a few points (≈ 67–71 %); every remaining error was a category word never seen in training or a deliberately ambiguous name, so a single overall number would mostly measure the benchmark's vocabulary, not the model |
 | 2026-10-16 | **Theme follows the ⋮ menu instantly**: CSS `light-dark()` tokens instead of injecting one token set (owner reported "light UI not working": switching Dark → Light left the app's cards dark while Streamlit's widgets turned light) | Streamlit marks the chosen scheme with `color-scheme` on the app but doesn't rerun the script, so only CSS can react immediately |
 | 2026-10-15 | **PDF passwords remembered per account, encrypted** (owner's choice over a single password box and over plain storage); `cryptography` pinned (owner approved; already installed via pdfminer) | Banks reuse the same password monthly; encryption with a separate key file keeps a copied database from revealing them |
 | 2026-10-13 | **Headerless statements** (the owner's bank exports have no heading row): columns inferred from content, debit/credit orientation proved by the running balance, and the user can correct every column in the preview | Guessing alone could silently flip spends and income; the balance arithmetic makes it checkable, and the dropdowns make it fixable |

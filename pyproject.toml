@@ -18,3 +18,5 @@ select = ["E", "F", "W", "I", "B", "UP"]
 [tool.ruff.lint.per-file-ignores]
 # UI files hold HTML/markdown snippets that read better unsplit.
 "ui/*.py" = ["E501"]
+# The report generator holds markdown prose that reads better unsplit.
+"tools/evaluate_model.py" = ["E501"]

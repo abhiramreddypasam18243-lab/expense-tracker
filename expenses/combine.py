@@ -122,7 +122,7 @@ def preview(
     conn: sqlite3.Connection, inputs: list[StatementInput], fetch_rate: FetchRate = fx.fetch_rate
 ) -> CombinedPreview:
     """Parse every file, count new/duplicate/rejected rows and find transfer pairs. Writes nothing."""
-    rates, rules, fallback = import_context(conn, fetch_rate)
+    rates, rules, fallback, predictor = import_context(conn, fetch_rate)
     pending: set[str] = set()  # fingerprints of new rows from earlier files in this set
     files: list[FilePreview] = []
     for item in inputs:
@@ -154,7 +154,15 @@ def preview(
             else:
                 text = item.raw.decode("utf-8-sig") if isinstance(item.raw, bytes) else item.raw
             prepared = prepare_file(
-                conn, text, f.account, item.source_name, rates, rules, fallback, item.column_roles
+                conn,
+                text,
+                f.account,
+                item.source_name,
+                rates,
+                rules,
+                fallback,
+                item.column_roles,
+                predictor=predictor,
             )
         except UnicodeDecodeError:
             f.problem = "Not UTF-8 text. Export the statement as CSV (UTF-8)."

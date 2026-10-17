@@ -10,7 +10,7 @@ import logging
 import sys
 from collections.abc import Sequence
 
-from expenses import categorize, combine, db, exporter, insights, recurring, vault
+from expenses import categorize, combine, db, exporter, insights, learn, recurring, vault
 from expenses.anomaly import find_anomalies
 from expenses.importer import HeaderNotFoundError, import_file, undo_import
 from expenses.money import format_inr
@@ -181,6 +181,37 @@ def cmd_recategorize(conn, args) -> None:
     print(f"Recategorised {changed} transaction(s). Manual choices were kept.")
 
 
+def _pct(x: float | None) -> str:
+    return "  -  " if x is None else f"{x * 100:5.1f}%"
+
+
+def cmd_model_report(conn, args) -> None:
+    """Evaluate the learned categoriser on this database's own labels (spec 5.1)."""
+    enabled, threshold = learn.settings(conn)
+    print(f"Smart categories: {'on' if enabled else 'off'}, threshold {threshold:.2f}")
+    try:
+        ev = learn.evaluate_db(conn)
+    except learn.NotEnoughData as exc:
+        print(f"Not enough data to evaluate yet: {exc}.")
+        return
+    print(
+        f"Trained on {ev.n_train} transactions from {ev.train_merchants} merchants; "
+        f"tested on {ev.n_test} from {ev.test_merchants} merchants it has never seen."
+    )
+    print(f"Accuracy on unseen merchants: {_pct(ev.accuracy)}   macro-F1: {ev.macro_f1:.3f}")
+    print(
+        f"At threshold {ev.threshold:.2f}: labels {_pct(ev.coverage)} of rows, "
+        f"{_pct(ev.accuracy_at_threshold)} correct"
+    )
+    print("\nThreshold  labelled  correct")
+    for t, cov, acc in ev.thresholds:
+        print(f"  {t:.2f}     {_pct(cov)}   {_pct(acc)}")
+    print("\nCategory                 precision  recall  test rows")
+    for s in ev.per_category:
+        print(f"  {_shorten(s.name, 22):<22} {_pct(s.precision)}   {_pct(s.recall)}  {s.support:>5}")
+    print("\nLearning curve: " + ", ".join(f"{n} -> {_pct(a).strip()}" for n, a in ev.curve))
+
+
 def cmd_export(conn, args) -> None:
     text = exporter.export_csv(conn, month=args.month)
     try:
@@ -249,8 +280,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("recurring", help="recurring monthly payments")
     p.set_defaults(func=cmd_recurring)
 
-    p = sub.add_parser("recategorize", help="re-run rules (manual choices are kept)")
+    p = sub.add_parser("recategorize", help="re-run rules and the model (manual choices are kept)")
     p.set_defaults(func=cmd_recategorize)
+
+    p = sub.add_parser("model-report", help="how well smart categories work on your own data")
+    p.set_defaults(func=cmd_model_report)
 
     p = sub.add_parser("export", help="export transactions to CSV")
     p.add_argument("out")

@@ -13,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 
 DEFAULT_DB_PATH = "data/expenses.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: category_source 'model', category_confidence, app_settings (Step 22)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS categories (
@@ -59,13 +59,19 @@ CREATE TABLE IF NOT EXISTS transactions (
     fx_rate           TEXT,
     category_id       INTEGER REFERENCES categories(id) ON DELETE SET NULL,
     category_source   TEXT NOT NULL DEFAULT 'default'
-                      CHECK (category_source IN ('rule', 'manual', 'default')),
+                      CHECK (category_source IN ('rule', 'manual', 'default', 'model')),
     fingerprint       TEXT NOT NULL UNIQUE,
     batch_id          INTEGER NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
-    created_at        TEXT NOT NULL
+    created_at        TEXT NOT NULL,
+    category_confidence REAL  -- set when category_source = 'model' (0..1)
 );
 CREATE INDEX IF NOT EXISTS ix_transactions_date ON transactions(txn_date);
 CREATE INDEX IF NOT EXISTS ix_transactions_batch ON transactions(batch_id);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS fx_rates (
     currency    TEXT NOT NULL,
@@ -100,8 +106,50 @@ def connect(path: str | os.PathLike | None = None, shared_across_threads: bool =
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
+    _migrate_to_v2(conn)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
+
+
+# Columns a version-1 transactions table has (all kept by the migration).
+_V1_TRANSACTION_COLUMNS = (
+    "id, account, txn_date, description, description_norm, merchant, amount_minor, orig_currency, "
+    "orig_amount_minor, fx_rate, category_id, category_source, fingerprint, batch_id, created_at"
+)
+
+
+def _migrate_to_v2(conn: sqlite3.Connection) -> None:
+    """Version 1 -> 2: let category_source be 'model' and add category_confidence.
+
+    SQLite can't change a CHECK constraint, so the table is rebuilt in one transaction (all or
+    nothing); ids and fingerprints are copied unchanged. A no-op on version-2 databases.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'transactions'"
+    ).fetchone()
+    if row is None or "'model'" in row[0]:
+        return
+    create = _SCHEMA[_SCHEMA.index("CREATE TABLE IF NOT EXISTS transactions (") :]
+    create = create[: create.index(");") + 2].replace(
+        "CREATE TABLE IF NOT EXISTS transactions (", "CREATE TABLE transactions_v2 ("
+    )
+    conn.execute("PRAGMA foreign_keys = OFF")  # can't change inside a transaction
+    try:
+        conn.executescript(
+            f"""BEGIN;
+            {create}
+            INSERT INTO transactions_v2 ({_V1_TRANSACTION_COLUMNS})
+                SELECT {_V1_TRANSACTION_COLUMNS} FROM transactions;
+            DROP TABLE transactions;
+            ALTER TABLE transactions_v2 RENAME TO transactions;
+            COMMIT;"""
+        )
+    except sqlite3.Error:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(_SCHEMA)  # recreates the indexes dropped with the old table
 
 
 # --- import batches --------------------------------------------------------------
@@ -146,11 +194,17 @@ def insert_transaction(conn: sqlite3.Connection, row: dict) -> bool:
         """INSERT OR IGNORE INTO transactions
            (account, txn_date, description, description_norm, merchant, amount_minor,
             orig_currency, orig_amount_minor, fx_rate, category_id, category_source,
-            fingerprint, batch_id, created_at)
+            category_confidence, fingerprint, batch_id, created_at)
            VALUES (:account, :txn_date, :description, :description_norm, :merchant, :amount_minor,
                    :orig_currency, :orig_amount_minor, :fx_rate, :category_id, :category_source,
-                   :fingerprint, :batch_id, :created_at)""",
-        {"category_id": None, "category_source": "default", "created_at": _now(), **row},
+                   :category_confidence, :fingerprint, :batch_id, :created_at)""",
+        {
+            "category_id": None,
+            "category_source": "default",
+            "category_confidence": None,
+            "created_at": _now(),
+            **row,
+        },
     )
     return cur.rowcount == 1
 
@@ -173,15 +227,45 @@ def existing_fingerprints(conn: sqlite3.Connection, fingerprints: list[str]) -> 
 def list_non_manual_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Rows that rules may (re)categorise: everything except manual overrides."""
     return conn.execute(
-        "SELECT id, description_norm, category_id FROM transactions WHERE category_source != 'manual'"
+        "SELECT id, description_norm, amount_minor, category_id, category_source, category_confidence "
+        "FROM transactions WHERE category_source != 'manual'"
     ).fetchall()
 
 
-def set_transaction_category(conn: sqlite3.Connection, txn_id: int, category_id: int, source: str) -> None:
+def set_transaction_category(
+    conn: sqlite3.Connection, txn_id: int, category_id: int, source: str, confidence: float | None = None
+) -> None:
     conn.execute(
-        "UPDATE transactions SET category_id = ?, category_source = ? WHERE id = ?",
-        (category_id, source, txn_id),
+        "UPDATE transactions SET category_id = ?, category_source = ?, category_confidence = ? WHERE id = ?",
+        (category_id, source, confidence, txn_id),
     )
+
+
+def labelled_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Training data for the learned categoriser (5.1): manual and rule labels only, never 'model'."""
+    return conn.execute(
+        """SELECT t.id, t.description_norm, t.merchant, t.amount_minor, t.category_id, t.category_source
+           FROM transactions t JOIN categories c ON c.id = t.category_id
+           WHERE t.category_source IN ('manual', 'rule') AND c.name != 'Uncategorised'
+           ORDER BY t.id"""
+    ).fetchall()
+
+
+# --- app settings ------------------------------------------------------------------------------
+
+
+def get_setting(conn: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
+    row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else default
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    with conn:
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
 
 
 # --- categories -----------------------------------------------------------------------------
@@ -214,7 +298,8 @@ def update_category(conn: sqlite3.Connection, category_id: int, name: str, kind:
 def delete_category(conn: sqlite3.Connection, category_id: int, fallback_id: int) -> None:
     """Move the category's transactions to `fallback_id`, then delete it (rules/budgets cascade)."""
     conn.execute(
-        "UPDATE transactions SET category_id = ?, category_source = 'default' WHERE category_id = ?",
+        "UPDATE transactions SET category_id = ?, category_source = 'default', category_confidence = NULL "
+        "WHERE category_id = ?",
         (fallback_id, category_id),
     )
     conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))

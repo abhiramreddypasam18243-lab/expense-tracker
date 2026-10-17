@@ -1,9 +1,9 @@
-"""Settings: categories, keyword rules and monthly budgets."""
+"""Settings: categories, keyword rules, smart categories, budgets and saved PDF passwords."""
 
 import pandas as pd
 import streamlit as st
 
-from expenses import categorize, insights, vault
+from expenses import categorize, insights, learn, vault
 from expenses.money import MoneyParseError, format_inr, parse_amount
 from ui import theme
 from ui.common import card, esc, get_conn, page_header
@@ -29,10 +29,11 @@ categories = categorize.list_categories(conn)
 by_name = {c["name"]: c for c in categories}
 by_id = {c["id"]: c for c in categories}
 
-tab_categories, tab_rules, tab_budgets, tab_passwords = st.tabs(
+tab_categories, tab_rules, tab_smart, tab_budgets, tab_passwords = st.tabs(
     [
         ":material/category: Categories",
         ":material/rule: Rules",
+        ":material/auto_awesome: Smart categories",
         ":material/savings: Budgets",
         ":material/key: PDF passwords",
     ]
@@ -139,7 +140,7 @@ with tab_rules:
             st.session_state["rules_warning"] = f"{problems} incomplete row(s) were skipped."
         st.toast("Rules saved", icon=":material/check:")
         st.rerun()
-    if rerun_col.button("Re-run rules on all transactions", icon=":material/autorenew:", width="stretch"):
+    if rerun_col.button("Re-run rules and smart categories", icon=":material/autorenew:", width="stretch"):
         changed = categorize.recategorize(conn)
         st.toast(f"Recategorised {changed} transaction(s)", icon=":material/autorenew:")
     if warning := st.session_state.pop("rules_warning", None):
@@ -207,3 +208,132 @@ with tab_passwords, card("pdf-passwords"):
         vault.forget_all(conn)
         st.toast("Forgot all saved PDF passwords", icon=":material/check:")
         st.rerun()
+
+
+# --- smart categories (spec 5.1) ----------------------------------------------------------------------
+def pct(x: float | None) -> str:
+    return "—" if x is None else f"{x * 100:.0f}%"
+
+
+with tab_smart:
+    enabled, threshold = learn.settings(conn)
+    model = learn.model_for(conn)
+    control_col, info_col = st.columns([2, 3])
+    with control_col, card("smart-controls"):
+        st.markdown("**Smart categories**")
+        st.caption(
+            "When no rule matches, a model trained on **your** categories suggests one. "
+            "It learns from every category you set by hand."
+        )
+        on = st.toggle("Suggest categories", value=enabled, key="smart-on")
+        level = st.slider(
+            "Only when at least this sure",
+            min_value=learn.THRESHOLD_RANGE[0],
+            max_value=learn.THRESHOLD_RANGE[1],
+            value=float(threshold),
+            step=0.05,
+            format="%.2f",
+            disabled=not on,
+            help="Higher = fewer suggestions, but more of them right. Below it, rows stay Uncategorised.",
+        )
+        if on != enabled or abs(level - threshold) > 1e-9:
+            learn.set_enabled(conn, on)
+            learn.set_threshold(conn, round(level, 2))
+            st.rerun()
+        if st.button(
+            "Apply to my transactions", icon=":material/auto_awesome:", width="stretch", disabled=not on
+        ):
+            changed = categorize.recategorize(conn)
+            st.toast(
+                f"Updated {changed} transaction(s). Your own choices were kept.", icon=":material/check:"
+            )
+        if model is None:
+            st.info(
+                f"Not ready yet: it needs at least {learn.MIN_EXAMPLES} categorised transactions in "
+                f"{learn.MIN_CATEGORIES}+ categories. Set some categories on the Transactions page.",
+                icon=":material/hourglass_empty:",
+            )
+        else:
+            st.caption(f"Learned from {model.n_examples} transactions in {len(model.labels)} categories.")
+
+    with info_col, card("smart-score"):
+        st.markdown("**How well it works on your data**")
+        st.caption(
+            "Tested on merchants it has **never seen**: it learns from 75 % of your merchants and is scored "
+            "on the other 25 %."
+        )
+        try:
+            ev = learn.evaluate_db(conn)
+        except learn.NotEnoughData as exc:
+            st.caption(f"Not enough data to score yet — {exc}.")
+        else:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Right on new merchants", pct(ev.accuracy), help="If it always had to guess")
+            m2.metric(f"Labelled at {ev.threshold:.2f}", pct(ev.coverage), help="The rest stay Uncategorised")
+            m3.metric("Of those, right", pct(ev.accuracy_at_threshold))
+            st.caption(
+                f"{ev.n_train} transactions from {ev.train_merchants} merchants to learn · "
+                f"{ev.n_test} from {ev.test_merchants} other merchants to test."
+            )
+            with st.expander("Details: thresholds, categories, learning curve", icon=":material/analytics:"):
+                st.markdown("**Confidence threshold trade-off**")
+                st.dataframe(
+                    pd.DataFrame(
+                        {
+                            "Threshold": [f"{x:.2f}" for x, _, _ in ev.thresholds],
+                            "Rows labelled": [c for _, c, _ in ev.thresholds],
+                            "Right": [a if a is not None else 0.0 for _, _, a in ev.thresholds],
+                        }
+                    ),
+                    hide_index=True,
+                    width="stretch",
+                    column_config={
+                        "Rows labelled": st.column_config.ProgressColumn(
+                            format="percent", min_value=0, max_value=1
+                        ),
+                        "Right": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
+                    },
+                )
+                st.markdown("**Per category**")
+                st.dataframe(
+                    pd.DataFrame(
+                        {
+                            "Category": [s.name for s in ev.per_category],
+                            "Precision": [s.precision for s in ev.per_category],
+                            "Recall": [s.recall for s in ev.per_category],
+                            "Test rows": [s.support for s in ev.per_category],
+                        }
+                    ),
+                    hide_index=True,
+                    width="stretch",
+                    column_config={
+                        "Precision": st.column_config.ProgressColumn(
+                            format="percent",
+                            min_value=0,
+                            max_value=1,
+                            help="When it says this category, how often it's right",
+                        ),
+                        "Recall": st.column_config.ProgressColumn(
+                            format="percent",
+                            min_value=0,
+                            max_value=1,
+                            help="How many of this category it finds",
+                        ),
+                    },
+                )
+                st.markdown("**Learning curve** — accuracy as it learns from more of your transactions")
+                st.dataframe(
+                    pd.DataFrame(
+                        {
+                            "Examples": [n for n, _ in ev.curve],
+                            "Right on new merchants": [a for _, a in ev.curve],
+                        }
+                    ),
+                    hide_index=True,
+                    width="stretch",
+                    column_config={
+                        "Right on new merchants": st.column_config.ProgressColumn(
+                            format="percent", min_value=0, max_value=1
+                        )
+                    },
+                )

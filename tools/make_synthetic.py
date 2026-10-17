@@ -192,6 +192,187 @@ def generate_pdf(
     return table_pdf(["Txn Date", "Narration", "Withdrawal Amt", "Deposit Amt"], body, preamble, password)
 
 
+# --- labelled benchmark for the learned categoriser (spec 5.1) ---------------------------------------
+# Invented merchant names: a neutral first part (shared by every category, so it carries no
+# signal) + a category word. ~10 % of merchants get no category word at all (deliberately
+# ambiguous), like "SRI GANESH ENTERPRISES" on a real statement.
+NAME_PARTS = [
+    "SRI",
+    "NEW",
+    "GREEN",
+    "ROYAL",
+    "CITY",
+    "URBAN",
+    "OM",
+    "STAR",
+    "GOLDEN",
+    "SUN",
+    "BLUE",
+    "LOTUS",
+    "SAI",
+    "METRO PLAZA",
+    "PRIME",
+    "LAKSHMI",
+    "GANESH",
+    "HIGHWAY",
+    "NORTH",
+    "SOUTH",
+    "JAYA",
+    "VIJAY",
+    "ANAND",
+    "SHREE",
+    "KRISHNA",
+    "MODERN",
+    "UNITED",
+    "PEARL",
+    "SILVER",
+    "TRINITY",
+]
+CATEGORY_WORDS = {
+    "Food & Dining": [
+        "CAFE",
+        "KITCHEN",
+        "BIRYANI HOUSE",
+        "RESTAURANT",
+        "DHABA",
+        "BAKERY",
+        "PIZZERIA",
+        "SWEETS",
+        "COFFEE",
+        "TIFFIN CENTRE",
+        "FOOD COURT",
+        "BAR AND GRILL",
+    ],
+    "Groceries": [
+        "SUPERMARKET",
+        "KIRANA STORE",
+        "FRESH MART",
+        "VEGETABLES",
+        "PROVISIONS",
+        "DAIRY",
+        "HYPERMARKET",
+        "GENERAL STORES",
+        "FRUITS",
+    ],
+    "Transport": [
+        "PETROL PUMP",
+        "FUELS",
+        "TRAVELS CABS",
+        "AUTO SERVICE",
+        "PARKING",
+        "FUEL STATION",
+        "TYRES",
+        "MOTORS SERVICE",
+    ],
+    "Shopping": [
+        "FASHIONS",
+        "TEXTILES",
+        "FOOTWEAR",
+        "ELECTRONICS",
+        "GARMENTS",
+        "BOUTIQUE",
+        "MOBILES",
+        "HOME DECOR",
+        "JEWELLERS",
+    ],
+    "Bills & Utilities": [
+        "GAS AGENCY",
+        "WATER SUPPLY",
+        "POWER DISTRIBUTION",
+        "BROADBAND NET",
+        "MOBILE RECHARGE",
+        "DTH SERVICES",
+        "CABLE NETWORK",
+    ],
+    "Entertainment": [
+        "CINEMAS",
+        "MULTIPLEX",
+        "GAMING ZONE",
+        "BOWLING",
+        "STREAMING MEDIA",
+        "EVENTS",
+        "AMUSEMENT PARK",
+    ],
+    "Health": [
+        "PHARMA",
+        "MEDICALS",
+        "CLINIC",
+        "HOSPITALS",
+        "DIAGNOSTICS",
+        "DENTAL CARE",
+        "OPTICALS",
+        "CHEMISTS",
+    ],
+    "Education": [
+        "ACADEMY",
+        "TUTORIALS",
+        "BOOK DEPOT",
+        "COACHING CENTRE",
+        "SCHOOL FEES",
+        "LEARNING",
+        "STATIONERS",
+    ],
+    "Travel": ["TOURS AND TRAVELS", "HOLIDAYS", "RESORTS", "LODGE", "AIRWAYS", "RAIL BOOKING", "INN"],
+    "Salary": ["SALARY", "PAYROLL", "SAL CREDIT", "STIPEND"],
+    "Refunds": ["REFUND", "REVERSAL", "CASHBACK", "CHARGEBACK"],
+}
+INCOME_CATEGORIES = {"Salary", "Refunds"}
+AMBIGUOUS_WORDS = ["ENTERPRISES", "TRADERS", "AGENCIES", "SERVICES", "VENTURES", "CORPORATION"]
+_HANDLES = ["OKAXIS", "OKSBI", "OKICICI", "OKHDFC", "YBL", "PAYTM", "IBL"]
+_NOTES = ["Payment", "Paid via app", "UPI", "Pay", ""]
+
+
+def _labelled_text(rng: random.Random, name: str, income: bool) -> str:
+    ref = _ref(rng)
+    if income:
+        return rng.choice(
+            [f"NEFT {name} {ref}", f"IMPS {ref} {name}", f"UPI/{ref}/{name}/{rng.choice(_HANDLES)}"]
+        )
+    return rng.choice(
+        [
+            f"UPI/{ref}/{name}/{rng.choice(_HANDLES)}/{rng.choice(_NOTES)}",
+            f"POS {rng.randint(1000, 9999)} {name}",
+            f"UPI-{name}-{ref}-PAYMENT",
+            f"{name} {ref}",
+        ]
+    )
+
+
+def generate_labelled(
+    seed: int = 7,
+    merchants_per_category: int = 14,
+    txns_per_merchant: tuple[int, int] = (2, 6),
+    ambiguous_share: float = 0.10,
+) -> list[tuple[str, str, str, int]]:
+    """Labelled benchmark rows: (merchant, description, category, signed paise).
+
+    Synthetic only (privacy rule). Ambiguous merchants get a random category of the right kind,
+    so no model can be 100 % right on them — just like real statements.
+    """
+    rng = random.Random(seed)
+    rows: list[tuple[str, str, str, int]] = []
+    used: set[str] = set()
+    expense_categories = [c for c in CATEGORY_WORDS if c not in INCOME_CATEGORIES]
+    for category, words in CATEGORY_WORDS.items():
+        income = category in INCOME_CATEGORIES
+        for _ in range(merchants_per_category):
+            for _attempt in range(50):
+                ambiguous = rng.random() < ambiguous_share
+                word = rng.choice(AMBIGUOUS_WORDS if ambiguous else words)
+                name = f"{rng.choice(NAME_PARTS)} {rng.choice(NAME_PARTS)} {word}"
+                if name not in used:
+                    break
+            used.add(name)
+            label = category
+            if ambiguous:
+                label = rng.choice(sorted(INCOME_CATEGORIES) if income else expense_categories)
+            for _ in range(rng.randint(*txns_per_merchant)):
+                paise = rng.randint(5_000, 900_000)
+                rows.append((name, _labelled_text(rng, name, income), label, paise if income else -paise))
+    rng.shuffle(rows)
+    return rows
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Generate a synthetic bank statement (CSV or PDF).")
     parser.add_argument("--seed", type=int, default=42)
