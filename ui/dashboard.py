@@ -1,8 +1,10 @@
 """Dashboard: month story, KPI cards with sparklines, category donut, trend, budgets, alerts, recurring."""
 
+from datetime import date
+
 import streamlit as st
 
-from expenses import insights, recurring
+from expenses import forecast, insights, recurring
 from expenses.anomaly import find_anomalies
 from expenses.money import format_inr
 from ui import charts, theme
@@ -52,6 +54,14 @@ if summary.by_category:
 if summary.net_minor >= 0:
     sentence += f" You kept <b>{format_inr(summary.net_minor)}</b>."
 st.html(story(f"Your month · {month_label(month)}", sentence))
+
+# Budget early warning (6.4): only for the month in progress.
+if month == date.today().strftime("%Y-%m"):
+    ahead = forecast.forecast(conn, month)
+    if ahead and ahead.warnings:
+        with st.container(key="forecast-warning"):
+            st.warning(" ".join(c.message for c in ahead.warnings[:2]), icon=":material/trending_up:")
+            st.page_link("ui/forecast_page.py", label="See the forecast", icon=":material/arrow_forward:")
 
 # --- KPI cards ------------------------------------------------------------------------------------
 vs = f"vs {month_label(previous_month, short=True)}" if previous.txn_count else ""

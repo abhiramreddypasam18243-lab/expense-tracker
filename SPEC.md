@@ -325,6 +325,21 @@ A chat tab on the "Your CA" page, answered by a **free model running on this PC*
 - **Grounded answers**: every question is sent with a **context** built from the CA's own results — tax year and section names, both regimes' taxable income and tax, the recommended regime and saving, the deduction figures used, detected tax-relevant items with totals, upcoming deadlines and the checklist. The system prompt tells the model to use **only these figures** for numbers, to say what it needs when information is missing, to answer for India's tax rules, and to remind that it is not professional advice. Calculations are never left to the model.
 - Answers stream in as they are generated. The model's "thinking" never reaches the user: the app asks Ollama for the model's capabilities (`/api/show`); for a thinking model it requests `"think": true` so Ollama returns the thinking in a separate field that the app ignores; for other models it doesn't send the setting. As a safety net, `<think>…</think>` text and stray tags are removed. The chat history lives in the session only.
 
+### 6.4 Spending forecast and budget early warning (Step 23)
+
+`expenses/forecast.py` projects each expense category's **month-end total** from what has been spent up to an "as of" day *d* of a month with *D* days. Spend means the same as in 6.2 (debits outside transfer categories), in paise. Every projection is at least what has already been spent.
+
+- **Methods** (all use only transactions dated on or before the as-of date — no peeking at the future):
+  - `pace` — spent so far × D / d.
+  - `last_month` — last month's total for the category.
+  - `smoothing` — simple exponential smoothing (α = 0.5) of the previous up-to-6 monthly totals.
+  - `typical_rest` — spent so far + the **median** of "what was spent after day d" in the previous up-to-6 months (handles bills at the start of the month, which `pace` badly over-projects).
+- **Backtest** (`forecast.backtest`): for every month that has at least 3 earlier months of data, at as-of days 7, 14 and 21, each method projects every category and is compared with what really happened. Score: **WAPE** = Σ |projected − actual| / Σ actual (robust for small categories, unlike MAPE), overall and per checkpoint day, plus the error of the monthly total.
+- **Method choice**: the method with the lowest backtest WAPE on the user's own data; with too little history for a backtest, `typical_rest` if there is at least one earlier month, else `pace`. The chosen method and why are shown.
+- **Budget early warning** for each budgeted category: `over` (already spent more than the budget), `at_risk` (projected above the budget), `on_track`; plus **safe to spend per day** = (budget − spent) / days left (never negative) and a sentence like "At this pace Food & Dining will reach ₹8,200 — 17 % over its ₹7,000 budget."
+- **Forecast page** (navigation, after Insights): month and "as of" day; for the current month the as-of day is today. For a past month it is a **replay** ("pretend today is 15 Jun 2026"), and the page also shows what actually happened and the error. It shows the projected month total vs last month, the budget warnings, a per-category table (spent so far, projected, budget, status, safe per day), a cumulative-spend chart (actual so far, projection to month end, and in a replay what really happened; no budget line on the total, because budgets cover only some categories — they are compared per category in the table) and the backtest table. **Dashboard**: when the selected month is the current month and any budget is `at_risk` or `over`, a warning links to the Forecast page.
+- **CLI**: `forecast [--month YYYY-MM] [--as-of YYYY-MM-DD]` prints the projections, warnings and backtest summary.
+
 ## 7. Interfaces
 
 ### 7.1 CLI (`python -m expenses …`, argparse, standard library only)
@@ -611,6 +626,13 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-115** `learn.evaluate`: no merchant is in both train and test; it reports accuracy, macro-F1, per-category precision/recall/support and a confusion matrix; coverage falls as the threshold rises; the learning curve ends at the full training size; too little data returns "not enough data" instead of failing.
 - **AC-116** `python -m expenses model-report` prints the evaluation (exit 0) and says when there is not enough data; no log line contains a description or merchant.
 - **AC-117** Manual check: in the browser, Settings → Smart categories shows the scores; a transaction from an unseen merchant is labelled "Model · NN%" after import; correcting it by hand changes the next suggestion for similar merchants (recorded in the learning log).
+- **AC-118** Projections on hand-made data: `pace`, `last_month`, `smoothing` and `typical_rest` give the expected numbers (including a 28-day February and a category with no history); a projection is never below what was already spent; transactions dated after the as-of date do not change any projection.
+- **AC-119** Backtest on the synthetic statement (9 months): scores every method at days 7/14/21 with WAPE, uses only months with ≥ 3 earlier months, picks the lowest-WAPE method, and `typical_rest` beats `pace` at day 7 (rent at the start of the month).
+- **AC-120** Budget warnings: `over`, `at_risk` and `on_track` cases; safe-to-spend per day (0 when over, none on the last day); the sentence names the category, projected amount, percent over and budget.
+- **AC-121** With < 4 months of data the backtest reports "not enough history" and the method falls back (`typical_rest` with ≥ 1 earlier month, else `pace`); an empty database gives an empty forecast without errors.
+- **AC-122** CLI `forecast --month --as-of` prints projections, warnings and the chosen method (exit 0); a bad date exits 1.
+- **AC-123** The Forecast page renders for the current month, a replay month and an empty database (AppTest, light and dark); the Dashboard shows the budget warning only for the current month.
+- **AC-124** Manual check: in the browser, a replay month shows projected vs actual, the chart and the backtest table; a budget at risk appears on the Forecast page (recorded in the learning log).
 - **AC-111** `ui.style.inject()` adds the hidden rerun button and the theme-sync script with the mode this run drew with; the script asks for at most one rerun per switch.
 - **AC-110** Manual check: on the deployed web app and locally, switching the ⋮ menu Dark → Light and Light → Dark gives a fully consistent page (backgrounds, cards, text, sidebar), and charts, sparklines and category colours follow by themselves within a moment, without a click (recorded in the learning log).
 - **AC-104** Manual check: in the browser, a headerless statement shows "Columns guessed", the role dropdowns change the result, and the import works (recorded in the learning log).
@@ -642,6 +664,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 20 | Remember PDF passwords per account (encrypted) | AC-105 – AC-108 |
 | 21 | Theme switching without a rerun (light-dark tokens) | AC-109 – AC-111 |
 | 22 | Learned categorisation from the user's corrections (scikit-learn) | AC-112 – AC-117 |
+| 23 | Spending forecast and budget early warning (backtested) | AC-118 – AC-124 |
 
 Rebuild the container after every step.
 
@@ -708,6 +731,7 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-13 | Category chart colours switched to a validated 8-hue palette; other categories fold into "Other" | The old Tailwind colours failed the colour check (Transport blue vs Education indigo: ΔE 7.2, below the 15 floor even for full colour vision) |
 | 2026-10-13 | **PDF statements** (owner's request): new runtime dependency **pdfplumber 0.11.10** (pulls pdfminer.six, pypdfium2, Pillow) and dev-only **fpdf2 2.8.9** for synthetic PDFs — both approved by the owner | pdfplumber reads tables cell by cell (pypdf only gives raw text, which would misplace columns); fpdf2 lets tests use synthetic PDFs, never real statements |
 | 2026-10-13 | Scanned PDFs get a clear message instead of OCR (owner's choice) | OCR needs a ~100 MB engine, is slow, misreads digits in amounts, and can't run on the web version |
+| 2026-10-17 | **Spending forecast** (owner chose option #2): four month-end projection methods, chosen per user by backtesting (WAPE) on their own past months; replay mode for past months | A single fixed method would be wrong for some spending patterns (bills early in the month break simple pace); backtesting on the user's data picks what works for them and makes the accuracy visible |
 | 2026-10-17 | **Learned categorisation** (owner chose option #1 of the improvement plan and approved `scikit-learn`): rules first, then a TF-IDF + Complement-Naive-Bayes model with a confidence threshold; evaluated on merchants never seen in training | Turns the user's corrections into training data; the merchant-grouped split measures real generalisation instead of memorised merchant names |
 | 2026-10-17 | Classifier = Complement Naive Bayes; AC-113 measures accuracy separately for known vs new vocabulary | Over 10 benchmarks the three classifiers were within a few points (≈ 67–71 %); every remaining error was a category word never seen in training or a deliberately ambiguous name, so a single overall number would mostly measure the benchmark's vocabulary, not the model |
 | 2026-10-16 | **Theme follows the ⋮ menu instantly**: CSS `light-dark()` tokens instead of injecting one token set (owner reported "light UI not working": switching Dark → Light left the app's cards dark while Streamlit's widgets turned light) | Streamlit marks the chosen scheme with `color-scheme` on the app but doesn't rerun the script, so only CSS can react immediately |

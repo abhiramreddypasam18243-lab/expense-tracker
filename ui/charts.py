@@ -196,3 +196,99 @@ def merchant_bars(merchants: list[tuple[str, int]], mode: str = "light") -> alt.
         .properties(height=max(130, 46 * len(df)), background="transparent")
         .configure_view(strokeWidth=0)
     )
+
+
+def forecast_line(
+    cumulative: list[tuple[int, int]], day: int, days: int, projected_total: int, mode: str
+) -> alt.LayerChart:
+    """Cumulative spend this month: actual up to the as-of day (solid), the projection to month end
+    (dashed, same hue: it continues the same series) and, in a replay, what really happened (muted).
+
+    One y-axis (rupees), recessive axes, legend on top, direct label on the projection's end,
+    crosshair + tooltip on hover.
+    """
+    tok = theme.tokens(mode)
+    spent_now = dict(cumulative).get(day, 0)
+    rows = [("Spent so far", d, v) for d, v in cumulative if d <= day]
+    rows += [("Projected", day, spent_now), ("Projected", days, projected_total)]
+    rows += [
+        ("What really happened", d, v)
+        for d, v in cumulative
+        if d >= day and cumulative[-1][0] == days and days > day
+    ]
+    df = pd.DataFrame(rows, columns=["Series", "Day", "paise"])
+    df["rupees"] = df["paise"] // 100
+    df["Amount"] = [format_inr(v) for v in df["paise"]]
+    series = ["Spent so far", "Projected", "What really happened"]
+    present = [s for s in series if s in set(df["Series"])]
+    colors = {
+        "Spent so far": tok["--accent"],
+        "Projected": tok["--accent"],
+        "What really happened": tok["--muted"],
+    }
+    color = alt.Color(
+        "Series:N",
+        scale=alt.Scale(domain=present, range=[colors[s] for s in present]),
+        legend=alt.Legend(
+            orient="top", title=None, labelColor=tok["--muted"], symbolStrokeWidth=2, symbolType="stroke"
+        ),
+    )
+    dash = alt.StrokeDash(
+        "Series:N",
+        scale=alt.Scale(domain=present, range=[[6, 4] if s == "Projected" else [1, 0] for s in present]),
+        legend=None,
+    )
+    top = max(int(df["rupees"].max()) * 11 // 10, 1)
+    base = alt.Chart(df).encode(
+        x=alt.X(
+            "Day:Q",
+            scale=alt.Scale(domain=[1, days], nice=False),
+            axis=alt.Axis(
+                title=None, tickCount=6, grid=False, domain=False, ticks=False, labelColor=tok["--muted"]
+            ),
+        ),
+        y=alt.Y(
+            "rupees:Q",
+            scale=alt.Scale(domain=[0, top]),
+            axis=alt.Axis(
+                title=None,
+                grid=True,
+                gridColor=tok["--track"],
+                domain=False,
+                ticks=False,
+                tickCount=4,
+                labelColor=tok["--muted"],
+                labelExpr="'₹' + format(datum.value, ',.0f')",
+            ),
+        ),
+    )
+    lines = base.mark_line(strokeWidth=2, interpolate="monotone").encode(color=color, strokeDash=dash)
+    end = df[(df["Series"] == "Projected") & (df["Day"] == days)].assign(
+        label=f"{compact_inr(projected_total)} projected"
+    )
+    label = (
+        alt.Chart(end)
+        .mark_text(align="right", dx=-4, dy=-10, fontSize=12, fontWeight=600, color=tok["--text"])
+        .encode(x="Day:Q", y="rupees:Q", text="label:N")
+    )
+    hover = alt.selection_point(
+        fields=["Day"], nearest=True, on="pointerover", empty=False, clear="pointerout"
+    )
+    targets = (
+        base.mark_point(size=400, opacity=0)
+        .encode(tooltip=["Series:N", "Day:Q", "Amount:N"])
+        .add_params(hover)
+    )
+    dots = base.mark_point(size=70, filled=True, stroke=tok["--surface"], strokeWidth=2).encode(
+        color=color, opacity=alt.condition(hover, alt.value(1), alt.value(0))
+    )
+    rule = (
+        base.mark_rule(color=tok["--muted"], strokeWidth=1)
+        .encode(opacity=alt.condition(hover, alt.value(0.6), alt.value(0)))
+        .transform_filter(hover)
+    )
+    return (
+        (lines + rule + dots + targets + label)
+        .properties(height=340, background="transparent")
+        .configure_view(strokeWidth=0)
+    )

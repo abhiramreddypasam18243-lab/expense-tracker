@@ -9,8 +9,9 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
+from datetime import date
 
-from expenses import categorize, combine, db, exporter, insights, learn, recurring, vault
+from expenses import categorize, combine, db, exporter, forecast, insights, learn, recurring, vault
 from expenses.anomaly import find_anomalies
 from expenses.importer import HeaderNotFoundError, import_file, undo_import
 from expenses.money import format_inr
@@ -185,6 +186,44 @@ def _pct(x: float | None) -> str:
     return "  -  " if x is None else f"{x * 100:5.1f}%"
 
 
+def cmd_forecast(conn, args) -> None:
+    """Month-end projection per category and budget warnings (spec 6.4)."""
+    try:
+        as_of = date.fromisoformat(args.as_of) if args.as_of else None
+        if args.month:
+            insights.parse_month(args.month)
+        month = args.month or (as_of.strftime("%Y-%m") if as_of else None)
+        result = forecast.forecast(conn, month, as_of)
+    except ValueError as exc:
+        raise UserError(f"invalid --month/--as-of: {exc}") from None
+    if result is None:
+        print("No transactions yet.")
+        return
+    mode = "replay of a past month" if result.replay else "this month"
+    print(
+        f"Forecast for {result.month}, as of {result.as_of:%d %b %Y} "
+        f"(day {result.day} of {result.days}, {mode})"
+    )
+    print(f"Method: {forecast.METHOD_LABELS[result.method]} — {result.reason}")
+    line = f"Spent so far {format_inr(result.spent_total)} -> projected {format_inr(result.projected_total)}"
+    line += f" (last month {format_inr(result.last_month_total)})"
+    if result.actual_total is not None:
+        line += f"; actually spent {format_inr(result.actual_total)}"
+    print(line)
+    print(f"\n{'Category':<22} {'Spent':>14} {'Projected':>14} {'Budget':>14}  Status")
+    for c in result.categories:
+        budget = format_inr(c.budget) if c.budget else "-"
+        status = {"over": "OVER", "at_risk": "at risk", "on_track": "on track"}.get(c.status or "", "")
+        amounts = f"{format_inr(c.spent):>14} {format_inr(c.projected):>14} {budget:>14}"
+        print(f"{_shorten(c.name, 22):<22} {amounts}  {status}")
+    for c in result.warnings:
+        print(f"! {c.message}")
+    if result.backtest:
+        print(f"\nBacktest on {len(result.backtest.months)} past month(s), error (WAPE, lower is better):")
+        for s in result.backtest.scores:
+            print(f"  {forecast.METHOD_LABELS[s.method]:<48} {s.wape * 100:6.1f}%")
+
+
 def cmd_model_report(conn, args) -> None:
     """Evaluate the learned categoriser on this database's own labels (spec 5.1)."""
     enabled, threshold = learn.settings(conn)
@@ -285,6 +324,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("model-report", help="how well smart categories work on your own data")
     p.set_defaults(func=cmd_model_report)
+
+    p = sub.add_parser("forecast", help="month-end spending projection and budget warnings")
+    p.add_argument("--month", help="YYYY-MM (default: the latest month)")
+    p.add_argument("--as-of", help="YYYY-MM-DD: pretend today is this day (replay a past month)")
+    p.set_defaults(func=cmd_forecast)
 
     p = sub.add_parser("export", help="export transactions to CSV")
     p.add_argument("out")

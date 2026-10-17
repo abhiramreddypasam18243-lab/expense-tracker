@@ -18,6 +18,7 @@ PAGES = [
     "ui/transactions.py",
     "ui/import_data.py",
     "ui/insights_page.py",
+    "ui/forecast_page.py",
     "ui/ca.py",
     "ui/settings.py",
 ]

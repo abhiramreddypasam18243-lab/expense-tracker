@@ -541,3 +541,44 @@ Docker 29.1.3 / Compose 2.40.3 in WSL Ubuntu, run as the normal user, on a copy 
 
 **One thing that could go wrong**
 - Naive Bayes is over-confident: probabilities near 1.0 are common, so the threshold mostly separates "seen this kind of word" from "never seen it", rather than giving a finely calibrated probability. The table shows these as "99%+".
+
+## Step 23 — Spending forecast and budget early warning (AC-118 to AC-124) — 2026-10-17
+
+**Why**: budgets only said "you are over" after it happened. A forecast warns while there is still time to change course.
+
+**What was built** (`expenses/forecast.py`, Forecast page, Dashboard warning, `python -m expenses forecast`)
+- Four ways to project each category's month-end spend from what has been spent by day *d*:
+  - *pace* (spent × days ÷ d),
+  - *same as last month*,
+  - *smoothed average* (exponential smoothing, α = 0.5, last 6 months),
+  - *spent so far + usual rest-of-month* (median of what was spent after day *d* in the last 6 months).
+  A projection is never below what is already spent, and only uses data up to the as-of date.
+- **Backtest**: for every past month with ≥ 3 earlier months, each method pretends to be on day 7, 14 and 21 and is scored against what really happened with **WAPE** (Σ|error| ÷ Σ actual). The lowest-error method on *your* data is used; with too little history it falls back to "usual rest-of-month" or pace.
+- **Budget early warning**: over / at risk / on track, "safe to spend per day", and a sentence ("At this pace Groceries will reach ₹11,821.97 — 48% over its ₹8,000.00 budget").
+- **Forecast page**: current month as of today, or a **replay** of a past month (pick the day) showing projected vs what really happened; cumulative chart (actual solid, projection dashed, real outcome muted, hover tooltip); per-category table; backtest table. The Dashboard shows the warning only for the month in progress.
+
+**Results (synthetic statement, 9 months)**: errors over 5 backtested months:
+
+| Method | Error (WAPE) |
+|---|---|
+| usual rest-of-month (chosen) | 28.8 % |
+| smoothed average | 33.3 % |
+| same as last month | 37.3 % |
+| pace | 75.7 % |
+
+On day 7, pace's error is 133 %, because rent on the 3rd gets multiplied by 4.
+
+**Manual check (AC-124)**: in the browser (light and dark), the September replay on day 15 showed:
+- projected ₹87,753 vs actual ₹1,41,853;
+- Food & Dining "over" and Groceries "at risk";
+- the chart with a working hover tooltip, and the backtest table.
+
+The big miss came from a one-off ₹65,000 Amazon purchase on the 25th, which no method could predict. That's exactly what the replay is for.
+
+**Why it is designed this way**
+- *Backtest on the user's own months*: different people spend differently (bills early vs. evenly spread); measuring beats guessing which method fits.
+- *WAPE instead of MAPE*: MAPE explodes for small categories (₹50 off on ₹10 = 500 %); WAPE weights errors by money.
+- *No future data*: a test removes/adds transactions after the as-of day and checks that no projection changes.
+
+**One thing that could go wrong**
+- One-off large purchases and irregular income months make any forecast miss; with only a few months of history the method choice rests on little evidence.
