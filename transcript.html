@@ -1,0 +1,914 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Tracker Conversation Transcript</title>
+<style>
+:root {
+  --bg: #F4F5FB; --surface: #FFFFFF; --surface-2: #F7F8FC; --border: #E3E6F0; --text: #0F172A; --muted: #64748B;
+  --accent: #5B5BF6; --accent-soft: rgba(91,91,246,.10); --you: #EEF0FF; --code: #F1F3F9; --shadow: 0 1px 2px rgba(16,24,40,.04), 0 10px 28px -14px rgba(16,24,40,.16);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0A0E1A; --surface: #121829; --surface-2: #0F1424; --border: #1E2640; --text: #E7EAF3; --muted: #94A0B8;
+  --accent: #8B8CFF; --accent-soft: rgba(139,140,255,.14); --you: #1A2040; --code: #0D1222; --shadow: 0 14px 34px -16px rgba(0,0,0,.7);
+} }
+:root[data-theme="dark"] {
+  --bg: #0A0E1A; --surface: #121829; --surface-2: #0F1424; --border: #1E2640; --text: #E7EAF3; --muted: #94A0B8;
+  --accent: #8B8CFF; --accent-soft: rgba(139,140,255,.14); --you: #1A2040; --code: #0D1222; --shadow: 0 14px 34px -16px rgba(0,0,0,.7);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.top { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+.top-in { max-width: 1180px; margin: 0 auto; padding: 12px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.top h1 { font-size: 1.05rem; margin: 0 auto 0 0; }
+.top input { flex: 1 1 220px; max-width: 320px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; }
+button { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+.layout { max-width: 1180px; margin: 0 auto; padding: 24px 16px 80px; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 24px; }
+.intro { grid-column: 1 / -1; }
+.intro h2 { margin: 0 0 4px; font-size: 1.7rem; }
+.intro p { margin: 0; color: var(--muted); }
+nav { position: sticky; top: 76px; align-self: start; max-height: calc(100vh - 96px); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 10px; box-shadow: var(--shadow); }
+nav h3 { margin: 4px 8px 8px; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+nav ol { list-style: none; margin: 0; padding: 0; }
+nav a { display: flex; gap: 8px; padding: 6px 8px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: .86rem; line-height: 1.35; overflow-wrap: anywhere; min-width: 0; }
+nav a:hover { background: var(--accent-soft); }
+nav .n { flex: none; min-width: 26px; color: var(--accent); font-weight: 700; }
+main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.turn { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; box-shadow: var(--shadow); }
+.turn.hidden { display: none; }
+.turn-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.badge { font-weight: 800; font-size: .82rem; color: var(--accent); background: var(--accent-soft); padding: 3px 10px; border-radius: 999px; text-decoration: none; }
+time { color: var(--muted); font-size: .82rem; }
+.who { font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.you { background: var(--you); border-radius: 12px; padding: 10px 14px; }
+.you .md { font-weight: 500; }
+.reply { margin-top: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.reply > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+.reply > summary::-webkit-details-marker { display: none; }
+.reply > summary .meta { color: var(--muted); font-size: .82rem; margin-left: auto; }
+.chev { width: 9px; height: 9px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; }
+.reply[open] > summary .chev { transform: rotate(45deg); }
+.reply > summary:focus-visible, button:focus-visible, nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.reply-body { padding: 6px 16px 16px; border-top: 1px solid var(--border); }
+.md { overflow-wrap: anywhere; }
+.md p { margin: .55em 0; }
+.md h1, .md h2, .md h3, .md h4 { margin: .9em 0 .3em; color: var(--text); }
+.md h1 { font-size: 1.3rem; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.md h2 { font-size: 1.15rem; }
+.md h3 { font-size: 1.02rem; }
+.md ul, .md ol { margin: .4em 0; padding-left: 1.4em; }
+.md li { margin: .2em 0; }
+.md code { font: .86em ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--code); padding: .15em .4em; border-radius: 5px; }
+.md pre { background: var(--code); padding: 12px 14px; border-radius: 10px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; }
+.md blockquote { margin: .6em 0; padding: .4em .9em; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; color: var(--text); }
+.tbl { overflow-x: auto; margin: .8em 0; }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--code); font-weight: 600; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 1.2em 0; }
+@media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } nav { position: static; max-height: 280px; } }
+@media print { .top, nav { display: none; } .layout { display: block; } details.reply { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="top"><div class="top-in">
+  <h1>Expense Tracker</h1>
+  <input id="q" type="search" placeholder="Search the conversation…" aria-label="Search the conversation">
+  <button id="expand">Expand all</button><button id="collapse">Collapse all</button><button id="theme" aria-label="Toggle light/dark">◐</button>
+</div></div>
+<div class="layout">
+  <div class="intro"><h2>Conversation Transcript</h2>
+    <p>8 turns · Review & Viva Preparation Session. Click a turn's response to expand or collapse it.</p></div>
+  <nav aria-label="Turns"><h3>Turns</h3><ol><li><a href="#turn-1"><span class="n">1</span>once completely go through this project</a></li><li><a href="#turn-2"><span class="n">2</span>Why money is stored as integers and parsed with Decimal, with an examp…</a></li><li><a href="#turn-3"><span class="n">3</span>what is anamoly detection</a></li><li><a href="#turn-4"><span class="n">4</span>how does spending forecast work</a></li><li><a href="#turn-5"><span class="n">5</span>what are desicion logs</a></li><li><a href="#turn-6"><span class="n">6</span>from where data of CA advisor and tax calculator taken from</a></li><li><a href="#turn-7"><span class="n">7</span>what model does virtual CA uses</a></li><li><a href="#turn-8"><span class="n">8</span>what can be the other possible viva questions?</a></li></ol></nav>
+  <main>
+<section class="turn" id="turn-1" data-search="once completely go through this project # comprehensive project review: expense tracker
+
+this repository contains a **private, offline, single-user expense tracker and financial intelligence system** designed specifically for indian bank and card statements (csv and pdf). 
+
+---
+
+## 1. executive summary &amp; architecture
+
+the application has been built following a 23-step test-driven specification (`spec.md`) with **236 automated tests** (all currently passing) and zero lint errors (`ruff`).
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                          streamlit web ui                              │
+│  dashboard │ transactions │ import │ insights │ forecast │ ca │ settings │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │
+┌──────────────────────────────────▼─────────────────────────────────────┐
+│                           core application                             │
+│  ┌────────────────────────┐  ┌────────────────┐  ┌──────────────────┐  │
+│  │ ingestion &amp; dedupe     │  │ categorisation │  │ insights &amp; math  │  │
+│  │ • csv &amp; pdf parsers    │  │ • keyword rules│  │ • anomaly z-score│  │
+│  │ • column role inference│  │ • ml classifier│  │ • wape forecast  │  │
+│  │ • transfer pair match  │  │   (scikit-learn│  │ • subscriptions  │  │
+│  │ • vault (aes-128)      │  │    complement  │  │ • virtual ca     │  │
+│  │ • sha-256 fingerprint  │  │    naive bayes)│  │   (tax pla">
+  <header class="turn-head"><a class="badge" href="#turn-1">Turn 1</a><time>Session Step 1</time></header>
+  <div class="you"><div class="who">User</div><div class="md"><p>once completely go through this project</p>
+</div></div>
+  <details class="reply" open><summary><span class="who">Assistant Response</span><span class="meta">1104 words</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="reply-body"><div class="md"><h1>Comprehensive Project Review: Expense Tracker</h1>
+<p>This repository contains a <strong>private, offline, single-user expense tracker and financial intelligence system</strong> designed specifically for Indian bank and card statements (CSV and PDF).</p>
+<hr>
+<h2>1. Executive Summary &amp; Architecture</h2>
+<p>The application has been built following a 23-step test-driven specification (<code>SPEC.md</code>) with <strong>236 automated tests</strong> (all currently passing) and zero lint errors (<code>ruff</code>).</p>
+<pre><code>┌────────────────────────────────────────────────────────────────────────┐
+│                          Streamlit Web UI                              │
+│  Dashboard │ Transactions │ Import │ Insights │ Forecast │ CA │ Settings │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │
+┌──────────────────────────────────▼─────────────────────────────────────┐
+│                           Core Application                             │
+│  ┌────────────────────────┐  ┌────────────────┐  ┌──────────────────┐  │
+│  │ Ingestion &amp; Dedupe     │  │ Categorisation │  │ Insights &amp; Math  │  │
+│  │ • CSV &amp; PDF parsers    │  │ • Keyword rules│  │ • Anomaly z-score│  │
+│  │ • Column role inference│  │ • ML classifier│  │ • WAPE forecast  │  │
+│  │ • Transfer pair match  │  │   (scikit-learn│  │ • Subscriptions  │  │
+│  │ • Vault (AES-128)      │  │    Complement  │  │ • Virtual CA     │  │
+│  │ • SHA-256 fingerprint  │  │    Naive Bayes)│  │   (Tax planning) │  │
+│  └────────────────────────┘  └────────────────┘  └──────────────────┘  │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │
+┌──────────────────────────────────▼─────────────────────────────────────┐
+│                           Data &amp; Storage                               │
+│  • SQLite3 (data/expenses.db, schema v2) / In-memory for Web demo       │
+│  • Local AES-128 Fernet key file (pdf-passwords.key)                   │
+│  • Local Ollama service (Qwen3:4b-instruct for offline grounded tax)   │
+└────────────────────────────────────────────────────────────────────────┘</code></pre>
+<hr>
+<h2>2. Core Modules Breakdown</h2>
+<h3>2.1 Ingestion &amp; Parsing Pipeline</h3>
+<div class="tbl"><table><thead><tr>
+<th>Module</th>
+<th>Location</th>
+<th>Purpose &amp; Key Features</th>
+</tr></thead><tbody>
+<tr>
+<td><strong>Exact Money Math</strong></td>
+<td><code>expenses/money.py</code></td>
+<td><strong>Zero floating-point arithmetic</strong>: Stores all money as signed integers in minor units (<strong>paise</strong>). Rejects float inputs, enforces $\le 2$ decimal places, strips Indian currency symbols (<code>₹</code>, <code>Rs</code>, <code>INR</code>), formats for Indian numbering (<code>₹1,23,456.78</code>).</td>
+</tr>
+<tr>
+<td><strong>Dates</strong></td>
+<td><code>expenses/dates.py</code></td>
+<td>Indian day-first (<code>DD/MM/YYYY</code>, <code>DD-Mon-YYYY</code>) format parser.</td>
+</tr>
+<tr>
+<td><strong>Column Classification</strong></td>
+<td><code>expenses/columns.py</code></td>
+<td>Fuzzy header alias matching. For <strong>headerless statements</strong>, infers column roles by examining data distributions ($\ge 90\%$ dates, $\ge 90\%$ 2-decimal numbers) and mathematically proves Debit vs Credit orientation using the running balance.</td>
+</tr>
+<tr>
+<td><strong>Deduplication Engine</strong></td>
+<td><code>expenses/fingerprint.py</code></td>
+<td>SHA-256 fingerprinting using <code>account</code>, <code>txn_date</code>, <code>orig_currency</code>, <code>orig_amount_minor</code>, <code>description_norm</code>, and intra-batch <code>occurrence</code>. Supports identical legitimate charges (e.g., two ₹20 chai purchases on the same day) while preventing double-imports.</td>
+</tr>
+<tr>
+<td><strong>Combined Import</strong></td>
+<td><code>expenses/combine.py</code></td>
+<td>Multi-file, multi-account atomic import. Detects <strong>inter-account transfer pairs</strong> (debit + credit matching $\pm 3$ days, equal INR amount, different accounts) and marks them in preview.</td>
+</tr>
+<tr>
+<td><strong>PDF Extraction</strong></td>
+<td><code>expenses/pdf_import.py</code></td>
+<td>Table extraction using <code>pdfplumber</code>, multiline narration unwrapping, header repetition detection, and downloadable converted CSVs.</td>
+</tr>
+<tr>
+<td><strong>Password Vault</strong></td>
+<td><code>expenses/vault.py</code></td>
+<td>Encrypts bank PDF passwords at rest with AES-128-CBC + HMAC-SHA256 (Fernet). The key is kept in an owner-only file (<code>pdf-passwords.key</code>) separate from the database.</td>
+</tr>
+<tr>
+<td><strong>FX Conversion</strong></td>
+<td><code>expenses/fx.py</code></td>
+<td>Fetches historical ECB exchange rates via Frankfurter. The only network-facing module in the app; sends only currency code and date. Locally caches rates in SQLite.</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h3>2.2 Intelligence, Analytics &amp; Machine Learning</h3>
+<div class="tbl"><table><thead><tr>
+<th>Module</th>
+<th>Location</th>
+<th>Details &amp; Algorithmic Design</th>
+</tr></thead><tbody>
+<tr>
+<td><strong>Learned Categorisation</strong></td>
+<td><code>expenses/learn.py</code></td>
+<td><strong>Complement Naive Bayes</strong> with TF-IDF word 1–2-grams and character 3–5-grams. Trains on manual edits (weight 3) and rule matches (weight 1), <strong>never training on its own predictions</strong>. Evaluated via merchant-grouped splitting to benchmark accuracy against unseen merchants.</td>
+</tr>
+<tr>
+<td><strong>Anomaly Detection</strong></td>
+<td><code>expenses/anomaly.py</code></td>
+<td>Modified z-score: $M_i = 0.6745 \cdot (x_i - \text{median}) / \text{MAD}$ (falling back to $\text{MeanAD}$ if $\text{MAD} = 0$). Flags expenses where $M_i &gt; 3.5$ and $x_i \ge 2 \times \text{median}$.</td>
+</tr>
+<tr>
+<td><strong>Spending Forecast</strong></td>
+<td><code>expenses/forecast.py</code></td>
+<td>Month-end projection comparing 4 techniques: <em>Pace</em>, <em>Last Month</em>, <em>Exponential Smoothing</em>, and <em>Typical Rest-of-Month</em>. Automatically selects the best method per user using historical <strong>WAPE</strong> backtesting.</td>
+</tr>
+<tr>
+<td><strong>Subscriptions &amp; Recurring</strong></td>
+<td><code>expenses/recurring.py</code></td>
+<td>Detects monthly bills ($\ge 3$ payments, 20–40 day intervals, $\pm 10\%$ median amount) and flags upcoming expected payment dates.</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h3>2.3 Tax &amp; Virtual CA (Indian Income Tax)</h3>
+<div class="tbl"><table><thead><tr>
+<th>Module</th>
+<th>Location</th>
+<th>Capabilities</th>
+</tr></thead><tbody>
+<tr>
+<td><strong>Tax Calculator</strong></td>
+<td><code>expenses/tax.py</code></td>
+<td>Computes tax under both <strong>Old Regime</strong> and <strong>New Regime</strong> for <strong>FY 2025-26</strong> (Income-tax Act, 1961) and <strong>FY 2026-27</strong> (Income-tax Act, 2025). Handles standard deductions, Section 87A rebate with marginal relief, HRA exemption (metro 50% vs non-metro 40%), Section 80C, 80D, 24(b), 80E, 80G, and 80TTA/TTB.</td>
+</tr>
+<tr>
+<td><strong>CA Advisor &amp; Checklist</strong></td>
+<td><code>expenses/ca.py</code></td>
+<td>Scans statement debits/credits for tax deductions (LIC, PPF, NPS, health insurance, donations, home loan interest), pre-fills tax calculation inputs, and tracks filing dates (advance tax quarters, ITR deadline July 31).</td>
+</tr>
+<tr>
+<td><strong>Local LLM Chat (&quot;Ask your CA&quot;)</strong></td>
+<td><code>expenses/ai.py</code></td>
+<td>Connects to a local <strong>Ollama</strong> container running <code>qwen3:4b-instruct</code>. Strictly local (host check refuses non-loopback URLs). The LLM is grounded on exact computed tax figures and explicitly instructed never to calculate math itself.</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h3>2.4 User Interface &amp; Visual System</h3>
+<ul>
+<li><strong>Custom Token-Based Design System</strong>: Configured in <code>ui/theme.py</code> with dual-mode CSS tokens (<code>light-dark()</code>), local bundled fonts (<em>Plus Jakarta Sans</em> and <em>Inter</em> under <code>static/fonts/</code>), and zero external CDNs.</li>
+<li><strong>Instant Theme Synchronization</strong>: Solves Streamlit&#x27;s theme-switching limitation via a hidden DOM listener in <code>ui/style.py</code> that re-renders chart palettes immediately.</li>
+<li><strong>Pages</strong>:</li>
+</ul>
+<ol>
+<li><code>ui/dashboard.py</code>: Monthly story banner, 4 KPI cards with SVG sparklines, spend donut, 12-month bar chart, budget warnings.</li>
+<li><code>ui/transactions.py</code>: Interactive ledger with inline category overriding and CSV export.</li>
+<li><code>ui/import_data.py</code>: Multi-file drag-and-drop, PDF password unlocker, column role reassignment, batch undo.</li>
+<li><code>ui/insights_page.py</code>: Anomaly analysis, top merchants, recurring subscriptions.</li>
+<li><code>ui/forecast_page.py</code>: Budget early-warning gauges, historic month replay, cumulative projection charts.</li>
+<li><code>ui/ca.py</code>: Old vs New regime comparator, detected tax deductions, compliance checklist, local AI chat.</li>
+<li><code>ui/settings.py</code>: Category color manager, keyword rules, ML model evaluation metrics, saved PDF password manager.</li>
+</ol>
+<hr>
+<h3>2.5 Security, Privacy &amp; Deployment</h3>
+<ul>
+<li><strong>Privacy by Default</strong>: No telemetry. Statement uploads are processed entirely in memory. Only currency lookup (<code>fx.py</code>) uses outbound networking.</li>
+<li><strong>Two Operating Modes</strong>:</li>
+<li><strong>Desktop Mode</strong> (<code>app.py</code>): Persistent SQLite database in <code>data/expenses.db</code>.</li>
+<li><strong>Web Demo Mode</strong> (<code>demo_app.py</code>): Ephemeral <code>:memory:</code> database per browser session.</li>
+<li><strong>Docker Packaging</strong>: Non-root container (<code>Dockerfile</code>), bound to <code>127.0.0.1:8501</code> only in <code>docker-compose.yml</code> with an optional Ollama service.</li>
+<li><strong>Windows Desktop Integration</strong>: PowerShell scripts in <code>launcher/</code> that launch Docker in WSL, maintain a keep-alive background process, and launch Microsoft Edge in standalone app window mode (<code>msedge --app=...</code>).</li>
+</ul>
+<hr>
+<h2>3. Test Suite &amp; Verification Status</h2>
+<ul>
+<li><strong>Pytest Suite</strong>: All <strong>236 tests passed</strong> across 22 test suites in 53.78 seconds.</li>
+<li><strong>Code Quality</strong>: Passes <code>ruff check</code> with <strong>0 errors or warnings</strong>.</li>
+<li><strong>Documentation</strong>: Complete architectural spec in <code>SPEC.md</code>, step-by-step dev diary in <code>docs/learning-log.md</code>, and ML benchmark report in <code>docs/model-evaluation.md</code>.</li>
+</ul>
+<hr>
+</div></div>
+  </details>
+</section><section class="turn" id="turn-2" data-search="why money is stored as integers and parsed with decimal, with an example of a float error in financial systems, using standard floating-point numbers (`float`) is a well-known anti-pattern. in this project, money is handled using a two-part strategy: **parsed from text with `decimal`** and **stored/processed as signed `int` in minor units (paise)**.
+
+---
+
+### 1. the problem with floats: ieee 754 representation error
+
+computers store standard floats in base-2 (binary). just as $\frac{1}{3}$ cannot be written cleanly in base-10 ($0.3333\dots$), numbers like $0.10$ or $0.70$ cannot be represented cleanly in binary:
+
+```python
+&gt;&gt;&gt; 0.1 + 0.2
+0.30000000000000004
+
+&gt;&gt;&gt; (0.1 + 0.2) == 0.3
+false
+```
+
+#### real financial errors caused by floats
+
+1. **the truncation bug (losing paise on conversion):**
+   ```python
+   # trying to convert ₹29.99 into paise using float math:
+   amount = 29.99
+   paise = int(amount * 100)
+   print(paise)  
+   # output: 2998  &lt;-- lost 1 paisa!
+   ```
+   *why this happens:* `29.99` in ieee 754 binary float is actually `29.9899999999999984368...`. multiplying by 100 gives `2998.999999999999...`, and calling `int()` truncates the decimals, silently stealing 1 paisa.
+
+2. **summation drift over thousands of transactions:**
+   ```python
+   total = 0.0
+   for _ in range(100):
+       total += 0.10  # 10 paise
+
+   print(total)         # 9.99999999999998
+   print(total == 10.0) # false
+   ```
+   over months of bank statements, small drift errors compound into noticeabl">
+  <header class="turn-head"><a class="badge" href="#turn-2">Turn 2</a><time>Session Step 2</time></header>
+  <div class="you"><div class="who">User</div><div class="md"><p>Why money is stored as integers and parsed with Decimal, with an example of a float error</p>
+</div></div>
+  <details class="reply" open><summary><span class="who">Assistant Response</span><span class="meta">440 words</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="reply-body"><div class="md"><p>In financial systems, using standard floating-point numbers (<code>float</code>) is a well-known anti-pattern. In this project, money is handled using a two-part strategy: <strong>parsed from text with <code>Decimal</code></strong> and <strong>stored/processed as signed <code>int</code> in minor units (paise)</strong>.</p>
+<hr>
+<h3>1. The Problem with Floats: IEEE 754 Representation Error</h3>
+<p>Computers store standard floats in base-2 (binary). Just as $\frac{1}{3}$ cannot be written cleanly in base-10 ($0.3333\dots$), numbers like $0.10$ or $0.70$ cannot be represented cleanly in binary:</p>
+<pre><code>&gt;&gt;&gt; 0.1 + 0.2
+0.30000000000000004
+
+&gt;&gt;&gt; (0.1 + 0.2) == 0.3
+False</code></pre>
+<h4>Real Financial Errors Caused by Floats</h4>
+<ol>
+<li><strong>The Truncation Bug (Losing Paise on Conversion):</strong></li>
+</ol>
+<pre><code>   # Trying to convert ₹29.99 into paise using float math:
+   amount = 29.99
+   paise = int(amount * 100)
+   print(paise)  
+   # Output: 2998  &lt;-- Lost 1 paisa!</code></pre>
+<p><em>Why this happens:</em> <code>29.99</code> in IEEE 754 binary float is actually <code>29.9899999999999984368...</code>. Multiplying by 100 gives <code>2998.999999999999...</code>, and calling <code>int()</code> truncates the decimals, silently stealing 1 paisa.</p>
+<ol>
+<li><strong>Summation Drift Over Thousands of Transactions:</strong></li>
+</ol>
+<pre><code>   total = 0.0
+   for _ in range(100):
+       total += 0.10  # 10 paise
+
+   print(total)         # 9.99999999999998
+   print(total == 10.0) # False</code></pre>
+<p>Over months of bank statements, small drift errors compound into noticeable discrepancies between account balances and calculated totals.</p>
+<hr>
+<h3>2. Why Parsed with <code>Decimal</code></h3>
+<p>CSV and PDF statements supply numbers as text strings (e.g., <code>&quot;1,23,456.78&quot;</code>).</p>
+<p>In <code>expenses/money.py</code>:</p>
+<ul>
+<li>Python&#x27;s <code>Decimal</code> module works in <strong>base-10</strong>, matching how humans write currency.</li>
+<li><code>Decimal(&quot;29.99&quot;) * 100</code> evaluates exactly to <code>Decimal(&quot;2999.00&quot;)</code>, which converts to <code>int</code> <code>2999</code> without rounding or loss.</li>
+<li>It allows strict validation of decimal places:</li>
+</ul>
+<pre><code>  value = Decimal(clean_text)
+  if value.as_tuple().exponent &lt; -2:
+      raise MoneyParseError(&quot;more than 2 decimal places&quot;)</code></pre>
+<p>This immediately detects and rejects invalid rows like <code>10.555</code> rather than silently rounding.</p>
+<ul>
+<li>Floats are explicitly blocked at the boundary via <code>isinstance(text, str)</code>: if a float is passed in, precision might already be compromised before <code>Decimal</code> ever sees it.</li>
+</ul>
+<hr>
+<h3>3. Why Stored as Integers in Minor Units (Paise)</h3>
+<p>Once parsed, money is converted to an <strong>integer representing paise</strong> (e.g., ₹1,234.50 spent is <code>-123450</code>):</p>
+<ol>
+<li><strong>Guaranteed Exactness:</strong> Integer addition, subtraction, and multiplication in Python and SQLite have arbitrary precision and zero rounding error.</li>
+<li><strong>Database Performance &amp; Portability:</strong> Storing <code>amount_minor</code> as an SQLite <code>INTEGER</code> column makes queries like <code>SELECT SUM(amount_minor) FROM transactions</code> native, fast, and exact without requiring custom decimal extensions.</li>
+<li><strong>Industry Standard:</strong> Storing the lowest denomination (minor unit) as an integer is the global standard for banking systems and payment processors (such as Stripe and Razorpay).</li>
+<li><strong>Display Separation:</strong> Money remains an integer until it is formatted for human eyes via <code>format_inr()</code> (e.g., <code>-123450</code> $\to$ <code>&quot;-₹1,234.50&quot;</code>).</li>
+</ol>
+<hr>
+</div></div>
+  </details>
+</section><section class="turn" id="turn-3" data-search="what is anamoly detection **anomaly detection** (also known as *outlier detection*) is the process of identifying data points, events, or behaviors that deviate significantly from the expected baseline or normal pattern of a dataset.
+
+---
+
+### 1. the core idea
+
+imagine you track your daily coffee spend:
+$$\text{₹40, ₹45, ₹40, ₹50, ₹40, ₹45, ₹3,500, ₹40}$$
+
+the **₹3,500** value immediately stands out. it could represent:
+* **an error**: a typo, accidental duplicate charge, or system glitch.
+* **a fraud attempt**: stolen card or unauthorized transaction.
+* **a legitimate, unusual event**: buying an entire team lunch or coffee beans in bulk.
+
+anomaly detection algorithms systematically find these data points without requiring someone to inspect every single record manually.
+
+---
+
+### 2. types of anomalies
+
+| type | definition | real-world example |
+|---|---|---|
+| **point anomaly** | a single data point that is drastically different from the rest of the dataset. | a ₹1,50,000 electronics purchase on a student debit card. |
+| **contextual anomaly** | a data point that is normal in general, but anomalous within its specific context (time, location, category). | spending ₹5,000 on electricity in june vs december, or a heavy bench press logged on a scheduled rest day. |
+| **collective anomaly** | individual points look normal, but together as a sequence they indicate abnormal behavior. | fifty ₹10 charges occurring within 30 seconds (card testing attack). |
+
+---
+
+### 3. common appro">
+  <header class="turn-head"><a class="badge" href="#turn-3">Turn 3</a><time>Session Step 3</time></header>
+  <div class="you"><div class="who">User</div><div class="md"><p>what is anamoly detection</p>
+</div></div>
+  <details class="reply" open><summary><span class="who">Assistant Response</span><span class="meta">544 words</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="reply-body"><div class="md"><p><strong>Anomaly detection</strong> (also known as <em>outlier detection</em>) is the process of identifying data points, events, or behaviors that deviate significantly from the expected baseline or normal pattern of a dataset.</p>
+<hr>
+<h3>1. The Core Idea</h3>
+<p>Imagine you track your daily coffee spend:</p>
+<p>$$\text{₹40, ₹45, ₹40, ₹50, ₹40, ₹45, ₹3,500, ₹40}$$</p>
+<p>The <strong>₹3,500</strong> value immediately stands out. It could represent:</p>
+<ul>
+<li><strong>An error</strong>: A typo, accidental duplicate charge, or system glitch.</li>
+<li><strong>A fraud attempt</strong>: Stolen card or unauthorized transaction.</li>
+<li><strong>A legitimate, unusual event</strong>: Buying an entire team lunch or coffee beans in bulk.</li>
+</ul>
+<p>Anomaly detection algorithms systematically find these data points without requiring someone to inspect every single record manually.</p>
+<hr>
+<h3>2. Types of Anomalies</h3>
+<div class="tbl"><table><thead><tr>
+<th>Type</th>
+<th>Definition</th>
+<th>Real-World Example</th>
+</tr></thead><tbody>
+<tr>
+<td><strong>Point Anomaly</strong></td>
+<td>A single data point that is drastically different from the rest of the dataset.</td>
+<td>A ₹1,50,000 electronics purchase on a student debit card.</td>
+</tr>
+<tr>
+<td><strong>Contextual Anomaly</strong></td>
+<td>A data point that is normal in general, but anomalous within its specific context (time, location, category).</td>
+<td>Spending ₹5,000 on electricity in June vs December, or a heavy bench press logged on a scheduled rest day.</td>
+</tr>
+<tr>
+<td><strong>Collective Anomaly</strong></td>
+<td>Individual points look normal, but together as a sequence they indicate abnormal behavior.</td>
+<td>Fifty ₹10 charges occurring within 30 seconds (card testing attack).</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h3>3. Common Approaches to Anomaly Detection</h3>
+<h4>A. Standard Z-Score (Mean &amp; Standard Deviation)</h4>
+<p>Measures how many standard deviations ($\sigma$) a value ($x$) is away from the mean ($\mu$):</p>
+<p>$$Z = \frac{x - \mu}{\sigma}$$</p>
+<ul>
+<li><strong>Flaw for real-world data:</strong> Extreme outliers heavily distort both the mean ($\mu$) and standard deviation ($\sigma$), which causes the standard Z-score to miss subsequent anomalies (masking effect).</li>
+</ul>
+<h4>B. Robust / Modified Z-Score (Median &amp; MAD)</h4>
+<p>Instead of mean and standard deviation, it uses the <strong>median</strong> and <strong>Median Absolute Deviation (MAD)</strong>:</p>
+<p>$$M_i = \frac{0.6745 \times (x_i - \text{median})}{\text{MAD}}$$</p>
+<ul>
+<li>Because the median is not skewed by extreme values, this formula remains accurate even when huge outliers exist.</li>
+</ul>
+<h4>C. Machine Learning &amp; Proximity-Based Methods</h4>
+<ul>
+<li><strong>Isolation Forest:</strong> Builds decision trees; anomalies are isolated closer to the root of the tree because they require fewer splits to separate.</li>
+<li><strong>Local Outlier Factor (LOF):</strong> Measures the local density of a data point relative to its neighbors.</li>
+<li><strong>Autoencoders (Neural Networks):</strong> Trains a network to reconstruct normal data; points with high reconstruction error are flagged as anomalies.</li>
+</ul>
+<hr>
+<h3>4. How Anomaly Detection Works in This Project</h3>
+<p>In <code>expenses/anomaly.py</code>, anomaly detection is implemented to alert you when an expense is unusually large <strong>for its category</strong>:</p>
+<ol>
+<li><strong>Per-Category Grouping:</strong> It compares a spend only against other transactions in the same category (spending ₹15,000 is normal for <em>Rent</em>, but abnormal for <em>Food &amp; Dining</em>).</li>
+<li><strong>Modified Z-Score:</strong> Computes the score using exact <code>Decimal</code> math.</li>
+<li><strong>MAD = 0 Fallback:</strong> If more than half the transactions in a category are identical (e.g. repeated ₹649 Netflix subscriptions), $\text{MAD}$ becomes $0$. The app gracefully falls back to $\text{MeanAD}$ to prevent division by zero.</li>
+<li><strong>The Dual-Guardrail Rule:</strong></li>
+</ol>
+<p>A debit is only flagged if:</p>
+<ul>
+<li><strong>$M_i &gt; 3.5$</strong> (statistically unusual), <strong>AND</strong></li>
+<li><strong>$\text{Amount} \ge 2 \times \text{median}$</strong> (materially significant, preventing tiny variances in low-cost items from generating noise).</li>
+</ul>
+<hr>
+</div></div>
+  </details>
+</section><section class="turn" id="turn-4" data-search="how does spending forecast work most budget tools only tell you that you&#x27;ve overspent **after the month is already over**. 
+
+the **spending forecast** system in `expenses/forecast.py` provides an **early warning** mid-month (e.g., on day 10 or 15) by projecting where each category will land by the last day of the month, so you can course-correct before it&#x27;s too late.
+
+---
+
+### 1. the core problem &amp; setup
+
+on day $d$ of a month with $d$ days, the engine looks only at transactions that occurred **on or before day $d$** (it never peeks into the future). 
+
+it projects the month-end total for each category and enforces a baseline rule:
+$$\text{projected spend} \ge \text{spent so far}$$
+
+---
+
+### 2. the four forecasting methods
+
+the app implements four distinct projection algorithms:
+
+| method | how it works | formula / logic | best used for |
+|---|---|---|---|
+| **`pace`** | linear run-rate scaling. | $\text{spent so far} \times \frac{d}{d}$ | steady, uniform daily spending (e.g., groceries, daily tea/snacks). |
+| **`last_month`** | assumes this month will match the previous month. | total spent in that category last month. | predictable regular bills. |
+| **`smoothing`** | exponential smoothing over the last 6 months ($\alpha = 0.5$). | weighted average giving the highest weight to recent months. | trending or gradually shifting spend patterns. |
+| **`typical_rest`** | spent so far plus your historic median spend for the remainder of the month. | $\text{spent so far} + \text{medi">
+  <header class="turn-head"><a class="badge" href="#turn-4">Turn 4</a><time>Session Step 4</time></header>
+  <div class="you"><div class="who">User</div><div class="md"><p>how does spending forecast work</p>
+</div></div>
+  <details class="reply" open><summary><span class="who">Assistant Response</span><span class="meta">661 words</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="reply-body"><div class="md"><p>Most budget tools only tell you that you&#x27;ve overspent <strong>after the month is already over</strong>.</p>
+<p>The <strong>spending forecast</strong> system in <code>expenses/forecast.py</code> provides an <strong>early warning</strong> mid-month (e.g., on day 10 or 15) by projecting where each category will land by the last day of the month, so you can course-correct before it&#x27;s too late.</p>
+<hr>
+<h3>1. The Core Problem &amp; Setup</h3>
+<p>On day $d$ of a month with $D$ days, the engine looks only at transactions that occurred <strong>on or before day $d$</strong> (it never peeks into the future).</p>
+<p>It projects the month-end total for each category and enforces a baseline rule:</p>
+<p>$$\text{Projected Spend} \ge \text{Spent so Far}$$</p>
+<hr>
+<h3>2. The Four Forecasting Methods</h3>
+<p>The app implements four distinct projection algorithms:</p>
+<div class="tbl"><table><thead><tr>
+<th>Method</th>
+<th>How It Works</th>
+<th>Formula / Logic</th>
+<th>Best Used For</th>
+</tr></thead><tbody>
+<tr>
+<td><strong><code>pace</code></strong></td>
+<td>Linear run-rate scaling.</td>
+<td>$\text{Spent so far} \times \frac{D}{d}$</td>
+<td>Steady, uniform daily spending (e.g., groceries, daily tea/snacks).</td>
+</tr>
+<tr>
+<td><strong><code>last_month</code></strong></td>
+<td>Assumes this month will match the previous month.</td>
+<td>Total spent in that category last month.</td>
+<td>Predictable regular bills.</td>
+</tr>
+<tr>
+<td><strong><code>smoothing</code></strong></td>
+<td>Exponential smoothing over the last 6 months ($\alpha = 0.5$).</td>
+<td>Weighted average giving the highest weight to recent months.</td>
+<td>Trending or gradually shifting spend patterns.</td>
+</tr>
+<tr>
+<td><strong><code>typical_rest</code></strong></td>
+<td>Spent so far plus your historic median spend for the remainder of the month.</td>
+<td>$\text{Spent so far} + \text{median}(\text{spend after day } d \text{ in last 6 months})$</td>
+<td><strong>Front-loaded expenses</strong> (rent, tuition fees, monthly utility bills).</td>
+</tr>
+</tbody></table></div>
+<blockquote><strong>Note:</strong> 
+<blockquote><strong>Why <code>pace</code> alone fails:</strong> If you pay ₹25,000 rent on day 3 of a 30-day month, naive <code>pace</code> projects:</blockquote>
+<blockquote>$$₹25,000 \times \frac{30}{3} = ₹2,50,000$$</blockquote>
+<blockquote>It falsely predicts a 10× catastrophe! In contrast, <code>typical_rest</code> looks at previous months, sees that spending after day 3 in the <em>Rent</em> category is usually ₹0, and projects an accurate ₹25,000.</blockquote>
+<hr>
+<h3>3. Automatic Method Selection (Backtesting with WAPE)</h3>
+<p>Instead of forcing you to guess which mathematical formula to use, the system <strong>tests all four methods against your own past transaction history</strong>:</p>
+<ol>
+<li>It takes past complete months (requiring $\ge 3$ prior months of history).</li>
+<li>It simulates standing at checkpoints: <strong>Day 7, Day 14, and Day 21</strong>.</li>
+<li>It generates a projection using each of the 4 methods and compares it to what <strong>actually happened</strong> at the end of that month.</li>
+<li>It scores each method using <strong>WAPE (Weighted Absolute Percentage Error)</strong>:</li>
+</ol>
+<p>$$\text{WAPE} = \frac{\sum |\text{Projected} - \text{Actual}|}{\sum \text{Actual}}$$</p>
+<p><em>(WAPE is used instead of MAPE because standard MAPE explodes when spending is small — e.g. predicting ₹50 on an actual ₹10 spend is a 400% error, whereas WAPE weights errors by money).</em></p>
+<p>The algorithm with the <strong>lowest historical WAPE on your data</strong> is automatically chosen.</p>
+<p><em>(On test benchmarks, <code>typical_rest</code> scored an error of ~28.8%, compared to <code>pace</code> which suffered 75.7% error).</em></p>
+<hr>
+<h3>4. Budget Early Warning &amp; &quot;Safe to Spend&quot;</h3>
+<p>For each category with a configured budget:</p>
+<ol>
+<li><strong>Status Badges</strong>:</li>
+</ol>
+<ul>
+<li><strong><code>over</code></strong>: Already exceeded the monthly budget limit.</li>
+<li><strong><code>at_risk</code></strong>: Currently within budget, but projected month-end total will breach the limit.</li>
+<li><strong><code>on_track</code></strong>: Projected to finish safely within budget.</li>
+</ul>
+<ol>
+<li><strong>Safe to Spend Per Day</strong>:</li>
+</ol>
+<p>$$\text{Safe per day} = \frac{\max(0, \text{Budget} - \text{Spent so far})}{\text{Days left in month}}$$</p>
+<ol>
+<li><strong>Actionable Alerts</strong>: Formats natural-language warnings such as:</li>
+</ol>
+<blockquote><em>&quot;At this pace Groceries will reach ₹11,821 — 48% over its ₹8,000 budget.&quot;</em></blockquote>
+<hr>
+<h3>5. Historic Replay Mode</h3>
+<p>On the UI page (<code>ui/forecast_page.py</code>):</p>
+<ul>
+<li>For the <strong>current month</strong>, it uses today&#x27;s date.</li>
+<li>For <strong>past months</strong>, it acts as a &quot;time machine&quot; (e.g., <em>&quot;Pretend today is 15 September 2026&quot;</em>). It draws a chart showing:</li>
+<li><strong>Solid line</strong>: Actual spend up to that day.</li>
+<li><strong>Dashed line</strong>: What the model projected to the end of the month.</li>
+<li><strong>Muted line</strong>: What actually ended up happening, allowing you to see exactly where unexpected one-off purchases (like a sudden laptop repair) diverted from the forecast.</li>
+</ul>
+<hr>
+</div></div>
+  </details>
+</section><section class="turn" id="turn-5" data-search="what are desicion logs a **decision log** (often called an **architecture decision record** or **adr** in professional software engineering) is a formal, chronological record of significant technical and product choices made during a project.
+
+it documents not just **what** was decided, but more importantly **why** that choice was made over alternatives, including the trade-offs and constraints involved.
+
+---
+
+### 1. what goes into a decision log?
+
+typically, each entry records three things:
+1. **date:** when the decision was agreed upon.
+2. **decision:** what was changed, implemented, or chosen.
+3. **rationale / trade-off:** why that option was selected, what edge case forced the decision, or what alternatives were rejected.
+
+---
+
+### 2. why decision logs are essential
+
+* **prevents &quot;why did we do this?&quot; amnesia:** months later (or during a viva / code review), developers often forget why a non-obvious piece of code was written. a decision log prevents someone from &quot;cleaning up&quot; code that was actually solving a subtle edge case.
+* **documents trade-offs:** engineering rarely has perfect solutions, only trade-offs (e.g., speed vs. memory, strict privacy vs. external api convenience).
+* **formalizes rule exceptions:** if a core project rule must be bent (e.g. allowing one specific network call in a strict offline-only app), the decision log records the explicit owner approval and safety boundaries.
+
+---
+
+### 3. concrete examples from this project&#x27;s decisions log
+
+in this repos">
+  <header class="turn-head"><a class="badge" href="#turn-5">Turn 5</a><time>Session Step 5</time></header>
+  <div class="you"><div class="who">User</div><div class="md"><p>what are desicion logs</p>
+</div></div>
+  <details class="reply" open><summary><span class="who">Assistant Response</span><span class="meta">480 words</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="reply-body"><div class="md"><p>A <strong>Decision Log</strong> (often called an <strong>Architecture Decision Record</strong> or <strong>ADR</strong> in professional software engineering) is a formal, chronological record of significant technical and product choices made during a project.</p>
+<p>It documents not just <strong>what</strong> was decided, but more importantly <strong>why</strong> that choice was made over alternatives, including the trade-offs and constraints involved.</p>
+<hr>
+<h3>1. What Goes into a Decision Log?</h3>
+<p>Typically, each entry records three things:</p>
+<ol>
+<li><strong>Date:</strong> When the decision was agreed upon.</li>
+<li><strong>Decision:</strong> What was changed, implemented, or chosen.</li>
+<li><strong>Rationale / Trade-off:</strong> Why that option was selected, what edge case forced the decision, or what alternatives were rejected.</li>
+</ol>
+<hr>
+<h3>2. Why Decision Logs are Essential</h3>
+<ul>
+<li><strong>Prevents &quot;Why did we do this?&quot; Amnesia:</strong> Months later (or during a viva / code review), developers often forget why a non-obvious piece of code was written. A decision log prevents someone from &quot;cleaning up&quot; code that was actually solving a subtle edge case.</li>
+<li><strong>Documents Trade-offs:</strong> Engineering rarely has perfect solutions, only trade-offs (e.g., speed vs. memory, strict privacy vs. external API convenience).</li>
+<li><strong>Formalizes Rule Exceptions:</strong> If a core project rule must be bent (e.g. allowing one specific network call in a strict offline-only app), the decision log records the explicit owner approval and safety boundaries.</li>
+</ul>
+<hr>
+<h3>3. Concrete Examples from This Project&#x27;s Decisions Log</h3>
+<p>In this repository, the <strong>Decisions Log</strong> is kept in <strong><code>SPEC.md</code> Section 16</strong>. Here are notable examples from the project:</p>
+<h4>1. Preventing Substring Bugs (Cash vs. Treatment)</h4>
+<ul>
+<li><strong>Decision:</strong> Cash categorization rules match <code>ATM WDL</code>, <code>ATM CASH</code>, and <code>CASH WDL</code> — never just plain <code>ATM</code>.</li>
+<li><strong>Reason:</strong> The word <code>ATM</code> is a substring of <code>TRE</code><strong><code>ATM</code></strong><code>ENT</code>. Matching plain <code>ATM</code> silently converted hospital and medical bills into &quot;Cash&quot; expenses.</li>
+</ul>
+<h4>2. The Anomaly Detection 2× Guardrail</h4>
+<ul>
+<li><strong>Decision:</strong> Only flag an anomaly if the modified z-score $M &gt; 3.5$ <strong>and</strong> the amount is at least $2 \times$ the category median.</li>
+<li><strong>Reason:</strong> When fixed-price subscriptions dominate a category (e.g. 14 out of 29 Entertainment transactions were ₹649), the $\text{MAD}$ became just ₹0.69. Consequently, ordinary ₹300 cinema tickets triggered statistical anomaly alarms. The $2\times$ materiality rule fixed this noise.</li>
+</ul>
+<h4>3. Exception to the &quot;No Network&quot; Privacy Rule (Q5)</h4>
+<ul>
+<li><strong>Decision:</strong> Fetch live European Central Bank (ECB) rates for foreign currency conversion.</li>
+<li><strong>Reason:</strong> The project rule strictly forbade network calls. The decision log formally recorded an amendment: <strong>only</strong> currency code and date are sent (no amounts, descriptions, or user data), and all fetched rates are cached in SQLite so subsequent runs work completely offline.</li>
+</ul>
+<h4>4. The <code>light-dark()</code> Theme Switch Fix</h4>
+<ul>
+<li><strong>Decision:</strong> Use CSS <code>light-dark()</code> variables rather than choosing colors in Python.</li>
+<li><strong>Reason:</strong> Streamlit has an upstream limitation where toggling the theme in the top-right ⋮ menu does not rerun the Python script. Python could not react to theme changes, so only client-side CSS could switch colors instantly.</li>
+</ul>
+<hr>
+</div></div>
+  </details>
+</section><section class="turn" id="turn-6" data-search="from where data of ca advisor and tax calculator taken from the data used by the **tax calculator** and **virtual ca advisor** comes from two distinct sources:
+
+---
+
+### 1. statutory indian tax laws &amp; rates (official ground truth)
+
+the tax slabs, deduction limits, section numbers, and filing deadlines are coded in `expenses/tax.py` and `expenses/ca.py`. 
+
+as recorded in the project&#x27;s decisions log (`spec.md:l724`), this data was researched from indian tax legislation:
+
+* **legal frameworks supported:**
+  * **fy 2025-26:** *income-tax act, 1961* (sections 80c, 80d, 87a, 24(b), 115bac, etc.).
+  * **fy 2026-27:** *income-tax act, 2025* (takes effect 1 april 2026, renumbering sections: 80c $\to$ s.123, 80d $\to$ s.126, 87a $\to$ s.156, 115bac $\to$ s.202, etc.).
+* **primary government &amp; tax sources:**
+  * **incometaxindia.gov.in**: official income tax department portal (tax slabs, section 156 marginal rebate relief rules, filing calendars).
+  * **income-tax rules, 2026**: added 4 cities (bengaluru, hyderabad, pune, ahmedabad) to the 50% hra metro list alongside delhi, mumbai, kolkata, and chennai.
+  * **cleartax, taxguru, and tax2win**: used to cross-verify procedural dates (advance tax quarters, non-audit itr-3/4 deadline 31 august, revised returns to 31 march).
+
+---
+
+### 2. personal financial data (your bank statements)
+
+the calculator does not use mock numbers for your deductions—it scans **your own imported statements** stored in the local sqlite database (`expenses/ca.py:l30">
+  <header class="turn-head"><a class="badge" href="#turn-6">Turn 6</a><time>Session Step 6</time></header>
+  <div class="you"><div class="who">User</div><div class="md"><p>from where data of CA advisor and tax calculator taken from</p>
+</div></div>
+  <details class="reply" open><summary><span class="who">Assistant Response</span><span class="meta">492 words</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="reply-body"><div class="md"><p>The data used by the <strong>Tax Calculator</strong> and <strong>Virtual CA Advisor</strong> comes from two distinct sources:</p>
+<hr>
+<h3>1. Statutory Indian Tax Laws &amp; Rates (Official Ground Truth)</h3>
+<p>The tax slabs, deduction limits, section numbers, and filing deadlines are coded in <code>expenses/tax.py</code> and <code>expenses/ca.py</code>.</p>
+<p>As recorded in the project&#x27;s Decisions Log (<code>SPEC.md:L724</code>), this data was researched from Indian tax legislation:</p>
+<ul>
+<li><strong>Legal Frameworks Supported:</strong></li>
+<li><strong>FY 2025-26:</strong> <em>Income-tax Act, 1961</em> (Sections 80C, 80D, 87A, 24(b), 115BAC, etc.).</li>
+<li><strong>FY 2026-27:</strong> <em>Income-tax Act, 2025</em> (takes effect 1 April 2026, renumbering sections: 80C $\to$ s.123, 80D $\to$ s.126, 87A $\to$ s.156, 115BAC $\to$ s.202, etc.).</li>
+<li><strong>Primary Government &amp; Tax Sources:</strong></li>
+<li><strong>incometaxindia.gov.in</strong>: Official Income Tax Department portal (tax slabs, Section 156 marginal rebate relief rules, filing calendars).</li>
+<li><strong>Income-tax Rules, 2026</strong>: Added 4 cities (Bengaluru, Hyderabad, Pune, Ahmedabad) to the 50% HRA metro list alongside Delhi, Mumbai, Kolkata, and Chennai.</li>
+<li><strong>ClearTax, TaxGuru, and Tax2Win</strong>: Used to cross-verify procedural dates (Advance tax quarters, non-audit ITR-3/4 deadline 31 August, revised returns to 31 March).</li>
+</ul>
+<hr>
+<h3>2. Personal Financial Data (Your Bank Statements)</h3>
+<p>The calculator does not use mock numbers for your deductions—it scans <strong>your own imported statements</strong> stored in the local SQLite database (<code>expenses/ca.py:L30-L100</code>):</p>
+<ul>
+<li><strong>Date Window:</strong> Scans transactions falling strictly inside the Indian financial year (<strong>1 April to 31 March</strong>).</li>
+<li><strong>Automated Keyword Detection:</strong> Matches transaction descriptions against patterns:</li>
+<li><strong>80C (Life Insurance / PPF / Tuition):</strong> <code>LIC</code>, <code>HDFC LIFE</code>, <code>SBI LIFE</code>, <code>ICICI PRU</code>, <code>PPF</code>, <code>ELSS</code>, <code>TUITION</code>, <code>SCHOOL FEES</code>.</li>
+<li><strong>80CCD(1B) (NPS):</strong> <code>NPS</code>, <code>PRAN</code>.</li>
+<li><strong>80D (Health Insurance):</strong> <code>STAR HEALTH</code>, <code>NIVA BUPA</code>, <code>CARE HEALTH</code>, <code>MEDICLAIM</code>, <code>ICICI LOMBARD</code>.</li>
+<li><strong>24(b) (Home Loan):</strong> <code>HOME LOAN</code>, <code>HOUSING LOAN</code>, <code>HSG LOAN</code>.</li>
+<li><strong>80E (Education Loan):</strong> <code>EDUCATION LOAN</code>, <code>EDU LOAN</code>.</li>
+<li><strong>80G (Donations):</strong> <code>DONATION</code>, <code>PM CARES</code>, <code>CRY</code>, <code>GIVEINDIA</code>.</li>
+<li><strong>HRA (Rent):</strong> Sums transactions categorized as <code>Rent</code>.</li>
+<li><strong>80TTA / 80TTB (Savings Interest):</strong> Credits matching <code>INT PD</code>, <code>INTEREST CREDIT</code>, <code>SB INT</code>.</li>
+<li><strong>Gross vs. Net Salary:</strong> Credits under the <code>Salary</code> category.</li>
+<li><strong>Pre-filling:</strong> These detected totals are automatically pre-filled into the deduction boxes on the UI page, which you can adjust.</li>
+</ul>
+<hr>
+<h3>3. Compliance Calendar &amp; Checklist Data</h3>
+<p>The dates and requirements shown on the &quot;Your CA&quot; page come from CBDT (Central Board of Direct Taxes) statutory schedules:</p>
+<ul>
+<li><strong>Advance Tax Installments:</strong> 15 June (15%), 15 September (45%), 15 December (75%), and 15 March (100%).</li>
+<li><strong>ITR Filing Due Dates:</strong> 31 July (ITR-1/ITR-2), 31 August (ITR-3/ITR-4 non-audit), 31 December (Belated return), 31 March (Revised return).</li>
+<li><strong>Checklist Documents:</strong> Form 16, AIS/TIS, Form 26AS, bank interest certificates, rent receipts, and PAN–Aadhaar link status.</li>
+</ul>
+<hr>
+<h3>4. Local AI Chat (&quot;Ask your CA&quot;)</h3>
+<p>When using the AI chat tab (<code>expenses/ai.py:L28-L46</code>):</p>
+<ul>
+<li>The local <strong>Ollama</strong> LLM (<code>qwen3:4b-instruct</code>) does <strong>not</strong> search the internet or guess numbers.</li>
+<li>The application injects the exact computed figures from <code>expenses/tax.py</code> and <code>expenses/ca.py</code> directly into the LLM&#x27;s system prompt context. </li>
+<li>The model is strictly instructed to explain concepts and quote <em>only</em> those verified numbers.</li>
+</ul>
+<hr>
+</div></div>
+  </details>
+</section><section class="turn" id="turn-7" data-search="what model does virtual ca uses the **virtual ca** uses two different engines depending on what it is doing:
+
+---
+
+### 1. for the chat assistant (&quot;ask your ca&quot;)
+the ai chat uses **`qwen3:4b-instruct`**, running locally on your computer through **ollama** (`expenses/ai.py:l23`).
+
+#### why this specific model was chosen:
+* **runs fully offline on cpu:** at **~2.5 gb** (4 billion parameters), it is lightweight enough to run quickly on a standard pc processor without needing an expensive dedicated gpu or nvidia cuda setup.
+* **text-only &amp; efficient:** avoids heavier multimodal models (like `gemma3:4b` or `qwen3.5:4b` at 3.3+ gb) that package image/vision features unnecessary for tax discussions.
+* **instruct-tuned (no &quot;thinking&quot; lag):** the `-instruct` variant answers directly. in testing (`spec.md:l728`), deep reasoning/thinking models took over 60 seconds and leaked internal chain-of-thought tokens into the answer; `qwen3:4b-instruct` delivers clean answers in seconds.
+* **100% private:** operates strictly on your internal network (`http://ollama:11434` inside docker). non-localhost/external urls are blocked by security checks (`ai.py:l82-l96`), meaning your financial data never leaves your machine.
+
+---
+
+### 2. for the tax math &amp; slabs (no ai)
+the actual calculations (old vs. new regime comparison, tax slabs, section 87a rebate, standard deductions, hra exemptions) **do not use an ai model at all**.
+
+* they are computed with **deterministic python integer math** in `expenses/t">
+  <header class="turn-head"><a class="badge" href="#turn-7">Turn 7</a><time>Session Step 7</time></header>
+  <div class="you"><div class="who">User</div><div class="md"><p>what model does virtual CA uses</p>
+</div></div>
+  <details class="reply" open><summary><span class="who">Assistant Response</span><span class="meta">252 words</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="reply-body"><div class="md"><p>The <strong>Virtual CA</strong> uses two different engines depending on what it is doing:</p>
+<hr>
+<h3>1. For the Chat Assistant (&quot;Ask your CA&quot;)</h3>
+<p>The AI chat uses <strong><code>qwen3:4b-instruct</code></strong>, running locally on your computer through <strong>Ollama</strong> (<code>expenses/ai.py:L23</code>).</p>
+<h4>Why this specific model was chosen:</h4>
+<ul>
+<li><strong>Runs Fully Offline on CPU:</strong> At <strong>~2.5 GB</strong> (4 billion parameters), it is lightweight enough to run quickly on a standard PC processor without needing an expensive dedicated GPU or NVIDIA CUDA setup.</li>
+<li><strong>Text-Only &amp; Efficient:</strong> Avoids heavier multimodal models (like <code>gemma3:4b</code> or <code>qwen3.5:4b</code> at 3.3+ GB) that package image/vision features unnecessary for tax discussions.</li>
+<li><strong>Instruct-Tuned (No &quot;Thinking&quot; Lag):</strong> The <code>-instruct</code> variant answers directly. In testing (<code>SPEC.md:L728</code>), deep reasoning/thinking models took over 60 seconds and leaked internal chain-of-thought tokens into the answer; <code>qwen3:4b-instruct</code> delivers clean answers in seconds.</li>
+<li><strong>100% Private:</strong> Operates strictly on your internal network (<code>http://ollama:11434</code> inside Docker). Non-localhost/external URLs are blocked by security checks (<code>ai.py:L82-L96</code>), meaning your financial data never leaves your machine.</li>
+</ul>
+<hr>
+<h3>2. For the Tax Math &amp; Slabs (No AI)</h3>
+<p>The actual calculations (old vs. new regime comparison, tax slabs, Section 87A rebate, standard deductions, HRA exemptions) <strong>do not use an AI model at all</strong>.</p>
+<ul>
+<li>They are computed with <strong>deterministic Python integer math</strong> in <code>expenses/tax.py</code>.</li>
+<li>Small language models are known to make arithmetic mistakes and hallucinate numbers. Therefore, the Python code calculates the exact figures first and feeds them into <code>qwen3:4b-instruct</code> as strict context, with instructions to <strong>only explain the results and never recalculate the math</strong>.</li>
+</ul>
+<hr>
+</div></div>
+  </details>
+</section><section class="turn" id="turn-8" data-search="what can be the other possible viva questions? here is a curated list of the most probable **viva questions** for this project, organized by topic, along with the key points examiners look for.
+
+---
+
+### category 1: machine learning &amp; nlp (`expenses/learn.py`)
+
+#### q1: &quot;why did you choose complement naive bayes over logistic regression or svm?&quot;
+* **answer:** real bank transaction data has severe **class imbalance** (e.g. hundreds of food &amp; upi debits vs. only 1–2 salary credits). standard multinomial naive bayes tends to favor classes with more training examples. **complement naive bayes (cnb)** calculates weights using statistics from the *complement* of each class, making it significantly more accurate and robust on unbalanced text datasets. in benchmark tests, it matched or beat logistic regression while training in under a second on cpu.
+
+#### q2: &quot;why use a merchant-grouped train/test split instead of standard `train_test_split`?&quot;
+* **answer:** *(examiners love this!)* a random split would put `swiggy` in both training and test sets. the model would just memorize the name and boast a fake 99% accuracy. a **merchant-grouped split** ensures that no merchant appears in both train and test sets. this measures what truly matters: **can the model categorize a brand-new merchant it has never seen before?**
+
+#### q3: &quot;why include character 3–5 n-grams alongside word 1–2 n-grams in tf-idf?&quot;
+* **answer:** indian bank narrations often truncate or mangle merchant names (e.g., `swig">
+  <header class="turn-head"><a class="badge" href="#turn-8">Turn 8</a><time>Session Step 8</time></header>
+  <div class="you"><div class="who">User</div><div class="md"><p>what can be the other possible viva questions?</p>
+</div></div>
+  <details class="reply" open><summary><span class="who">Assistant Response</span><span class="meta">1021 words</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="reply-body"><div class="md"><p>Here is a curated list of the most probable <strong>Viva Questions</strong> for this project, organized by topic, along with the key points examiners look for.</p>
+<hr>
+<h3>Category 1: Machine Learning &amp; NLP (<code>expenses/learn.py</code>)</h3>
+<h4>Q1: &quot;Why did you choose Complement Naive Bayes over Logistic Regression or SVM?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> Real bank transaction data has severe <strong>class imbalance</strong> (e.g. hundreds of Food &amp; UPI debits vs. only 1–2 Salary credits). Standard Multinomial Naive Bayes tends to favor classes with more training examples. <strong>Complement Naive Bayes (CNB)</strong> calculates weights using statistics from the <em>complement</em> of each class, making it significantly more accurate and robust on unbalanced text datasets. In benchmark tests, it matched or beat Logistic Regression while training in under a second on CPU.</li>
+</ul>
+<h4>Q2: &quot;Why use a Merchant-Grouped Train/Test Split instead of standard <code>train_test_split</code>?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> <em>(Examiners love this!)</em> A random split would put <code>SWIGGY</code> in both training and test sets. The model would just memorize the name and boast a fake 99% accuracy. A <strong>merchant-grouped split</strong> ensures that no merchant appears in both train and test sets. This measures what truly matters: <strong>can the model categorize a brand-new merchant it has never seen before?</strong></li>
+</ul>
+<h4>Q3: &quot;Why include Character 3–5 n-grams alongside Word 1–2 n-grams in TF-IDF?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> Indian bank narrations often truncate or mangle merchant names (e.g., <code>SWIGGY*BANGALORE</code>, <code>SWGY01</code>, <code>AMZN-PAY</code>). Word n-grams would treat them as separate, unknown words. Character n-grams catch internal sub-words (<code>SWIG</code>, <code>AMZN</code>), enabling the model to recognize abbreviations and typos.</li>
+</ul>
+<h4>Q4: &quot;Why is the model forbidden from training on its own predictions (<code>category_source = &#x27;model&#x27;</code>)?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> To prevent a <strong>destructive feedback loop</strong> (bias amplification). If the model makes a wrong guess (e.g., misclassifying a hospital bill as <em>Shopping</em>) and then trains on that guess, it becomes increasingly confident in its own mistake over time. It only trains on human manual overrides (weight 3) and verified rules (weight 1).</li>
+</ul>
+<hr>
+<h3>Category 2: Ingestion &amp; Data Engineering (<code>expenses/columns.py</code>, <code>combine.py</code>)</h3>
+<h4>Q5: &quot;How do you detect column roles in bank statements that have NO header row?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> We use statistical inspection of cell contents:</li>
+<li>A column where $\ge 90\%$ of cells parse as dates is the <strong>Date</strong> column.</li>
+<li>A column where $\ge 90\%$ of cells are numeric <strong>and</strong> $\ge 80\%$ have two decimals is <strong>Money</strong> (the two-decimal rule ensures cheque numbers like <code>001234</code> are ignored).</li>
+<li>To tell <strong>Debit</strong> from <strong>Credit</strong>, we check arithmetic against the running balance:</li>
+</ul>
+<p>$$\text{Balance}_{\text{current}} - \text{Balance}_{\text{previous}} = \text{Credit} - \text{Debit}$$</p>
+<p>The arrangement that satisfies this equation across $\ge 80\%$ of rows proves the orientation mathematically.</p>
+<h4>Q6: &quot;How do you handle internal transfers between your own accounts?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> If you transfer ₹10,000 from HDFC to SBI, simple importing would log ₹10,000 expense and ₹10,000 income, distorting your true savings. The combined importer detects pairs: one debit and one credit with the <strong>exact same amount</strong>, in <strong>different accounts</strong>, occurring within <strong>$\pm 3$ days</strong> of each other. It flags them as <code>Transfers</code>, excluding them from both income and expense totals.</li>
+</ul>
+<h4>Q7: &quot;How does fingerprinting handle two genuine identical purchases on the same day?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> The SHA-256 fingerprint includes an <strong>occurrence index</strong>:</li>
+</ul>
+<p>$$\text{sha256}(\text{account} \mid \text{date} \mid \text{amount} \mid \text{description} \mid \mathbf{occurrence})$$</p>
+<p>If you buy two ₹20 teas on the same day, the first gets <code>occurrence = 0</code> and the second gets <code>occurrence = 1</code>. Both produce unique hashes and are saved. If you re-import the file, both hashes match existing rows and are correctly skipped as duplicates.</p>
+<hr>
+<h3>Category 3: Statistics &amp; Forecasting (<code>expenses/anomaly.py</code>, <code>forecast.py</code>)</h3>
+<h4>Q8: &quot;Why use Modified Z-score instead of standard Z-score for anomalies?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> Standard Z-score uses mean ($\mu$) and standard deviation ($\sigma$). If you make one massive ₹2,00,000 purchase, it artificially inflates the mean and blows up the standard deviation, causing the algorithm to miss subsequent anomalies (the <em>masking effect</em>). The <strong>Modified Z-score</strong> uses the <strong>median</strong> and <strong>MAD (Median Absolute Deviation)</strong>, which are resistant to extreme outliers.</li>
+</ul>
+<h4>Q9: &quot;Why does the forecast use WAPE instead of MAPE?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> <strong>MAPE (Mean Absolute Percentage Error)</strong> divides by actual spend. For small categories (e.g., ₹10 spent on parking, but projected ₹50), MAPE computes a $(50 - 10)/10 = 400\%$ error, skewing the overall score. <strong>WAPE (Weighted Absolute Percentage Error)</strong> divides the sum of absolute errors by the total money spent:</li>
+</ul>
+<p>$$\text{WAPE} = \frac{\sum |\text{Projected} - \text{Actual}|}{\sum \text{Actual}}$$</p>
+<p>This weights errors proportionally to the amount of money involved.</p>
+<h4>Q10: &quot;Why does the simple &#x27;pace&#x27; forecast fail on rent or utility bills?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> Naive pace multiplies daily spend by total month days ($\text{spent} \times D / d$). If you pay ₹20,000 rent on Day 2, pace calculates:</li>
+</ul>
+<p>$$₹20,000 \times \frac{30}{2} = ₹3,00,000$$</p>
+<p>The project implements <code>typical_rest</code>, which takes spend-to-date and adds the historical median of what is normally spent <em>after</em> that day, recognizing that post-rent spend is close to zero.</p>
+<hr>
+<h3>Category 4: Security, Systems &amp; Database</h3>
+<h4>Q11: &quot;How are bank PDF passwords stored securely?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> They are encrypted at rest using <strong>Fernet (AES-128-CBC + HMAC-SHA256)</strong> via the <code>cryptography</code> library. Crucially, the encryption key is stored in a separate, owner-restricted file (<code>pdf-passwords.key</code>) outside the database. If an attacker copies <code>expenses.db</code>, they cannot decrypt the passwords without the companion key file.</li>
+</ul>
+<h4>Q12: &quot;Why does the Docker container listen on <code>0.0.0.0</code> internally, while <code>docker-compose.yml</code> binds to <code>127.0.0.1</code>?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> Inside a container, <code>127.0.0.1</code> refers only to the container itself; if the app bound to <code>127.0.0.1</code> internally, Docker could not forward traffic from the host. Therefore, the app listens on <code>0.0.0.0</code> inside its network namespace. On the host side, Docker Compose binds specifically to <code>127.0.0.1:8501:8501</code> to ensure the port is accessible <strong>only</strong> to the local machine, preventing anyone on the same Wi-Fi network from accessing your financial data.</li>
+</ul>
+<h4>Q13: &quot;Why is the passphrase hashed with PBKDF2 instead of standard MD5 or SHA-256?&quot;</h4>
+<ul>
+<li><strong>Answer:</strong> Plain hashes like MD5 and SHA-256 are designed to be fast, making them vulnerable to brute-force and rainbow table attacks. We use <strong>PBKDF2-HMAC-SHA256 with 600,000 iterations</strong> and a random salt, forcing significant CPU work per attempt and making brute-force cracking practically impossible.</li>
+</ul></div></div>
+  </details>
+</section>
+  </main>
+</div>
+<script>
+const all = () => document.querySelectorAll("details.reply");
+document.getElementById("expand").onclick = () => all().forEach(d => d.open = true);
+document.getElementById("collapse").onclick = () => all().forEach(d => d.open = false);
+document.getElementById("theme").onclick = () => {
+  const r = document.documentElement, dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const now = r.dataset.theme || (dark ? "dark" : "light");
+  r.dataset.theme = now === "dark" ? "light" : "dark";
+};
+document.getElementById("q").addEventListener("input", e => {
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll(".turn").forEach(t => t.classList.toggle("hidden", !!q && !t.dataset.search.includes(q)));
+});
+function openHash() {
+  if (!/^#turn-\d+$/.test(location.hash)) return;
+  const d = document.querySelector(location.hash + " details.reply");
+  if (d) d.open = true;
+}
+addEventListener("hashchange", openHash); openHash();
+</script>
+</body>
+</html>
