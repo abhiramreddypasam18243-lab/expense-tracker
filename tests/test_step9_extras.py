@@ -59,7 +59,7 @@ def test_ac_49_merchant_acronyms(description, merchant):
 
 def test_ac_50_cash_rules(conn):
     kinds = {c["name"]: c["kind"] for c in cat.list_categories(conn)}
-    assert kinds["Cash"] == "expense"
+    assert kinds["Cash"] == "transfer"  # amended in Step 26: the cash wallet
     patterns = {r["pattern"] for r in cat.list_rules(conn)}
     assert {"ATM WDL", "ATM CASH", "CASH WDL"} <= patterns and "ATM" not in patterns
     rules = cat.list_rules(conn)

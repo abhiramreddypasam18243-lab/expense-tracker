@@ -4,7 +4,7 @@ from datetime import date
 
 import streamlit as st
 
-from expenses import forecast, insights, recurring
+from expenses import forecast, insights, manual, recurring
 from expenses.anomaly import find_anomalies
 from expenses.money import format_inr
 from ui import charts, theme
@@ -62,6 +62,17 @@ if month == date.today().strftime("%Y-%m"):
         with st.container(key="forecast-warning"):
             st.warning(" ".join(c.message for c in ahead.warnings[:2]), icon=":material/trending_up:")
             st.page_link("ui/forecast_page.py", label="See the forecast", icon=":material/arrow_forward:")
+
+# Cash wallet (I13): ATM withdrawals aren't spending, so say how much of that cash isn't logged yet.
+cash = manual.cash_gap(conn, month)
+if cash.unlogged_minor:
+    with st.container(key="cash-gap"):
+        st.info(
+            f"You withdrew **{format_inr(cash.withdrawn_minor)}** in cash in {month_label(month)}; "
+            f"**{format_inr(cash.unlogged_minor)}** of it isn't logged yet, so it isn't in your spending.",
+            icon=":material/payments:",
+        )
+        st.page_link("ui/transactions.py", label="Log cash spending", icon=":material/add:")
 
 # --- KPI cards ------------------------------------------------------------------------------------
 vs = f"vs {month_label(previous_month, short=True)}" if previous.txn_count else ""

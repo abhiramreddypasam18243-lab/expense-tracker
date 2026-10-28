@@ -11,10 +11,10 @@ import sys
 from collections.abc import Sequence
 from datetime import date
 
-from expenses import categorize, combine, db, exporter, forecast, insights, learn, recurring, vault
+from expenses import categorize, combine, db, exporter, forecast, insights, learn, manual, recurring, vault
 from expenses.anomaly import find_anomalies
 from expenses.importer import HeaderNotFoundError, import_file, undo_import
-from expenses.money import format_inr
+from expenses.money import MoneyParseError, format_inr, parse_amount
 from expenses.pdf_import import PdfImportError, pdf_to_csv
 
 
@@ -110,6 +110,42 @@ def cmd_pdf_to_csv(conn, args) -> None:
     except OSError as exc:
         raise UserError(f"cannot write {args.out}: {exc.strerror}") from None
     print(f"Converted {conversion.pages} page(s) into {conversion.rows} row(s): {args.out}")
+
+
+def cmd_add(conn, args) -> None:
+    try:
+        amount = parse_amount(args.spent or args.received)
+    except MoneyParseError:
+        raise UserError("amount must be a number, e.g. 250 or 1,200.50") from None
+    if amount <= 0:
+        raise UserError("give the amount without a minus sign; use --spent or --received")
+    try:
+        txn_date = date.fromisoformat(args.date) if args.date else date.today()
+    except ValueError:
+        raise UserError("date must be YYYY-MM-DD") from None
+    category_id = None
+    if args.category:
+        categorize.seed_defaults(conn)
+        category_id = categorize.category_id(conn, args.category)
+        if category_id is None:
+            raise UserError(f"no category named {args.category!r}")
+    signed = -amount if args.spent else amount
+    try:
+        txn_id = manual.add(conn, txn_date, signed, args.description, args.account, category_id)
+    except manual.EntryError as exc:
+        raise UserError(str(exc)) from None
+    row = db.get_transaction(conn, txn_id)
+    print(
+        f"Added #{txn_id}: {row['txn_date']} {format_inr(signed)} · {row['category_name']} · {row['account']}"
+    )
+
+
+def cmd_delete_entry(conn, args) -> None:
+    try:
+        manual.delete(conn, args.id)
+    except manual.EntryError as exc:
+        raise UserError(str(exc)) from None
+    print(f"Deleted #{args.id}.")
 
 
 def cmd_list(conn, args) -> None:
@@ -302,6 +338,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("out")
     p.add_argument("--password", help="for password-protected PDFs (never stored)")
     p.set_defaults(func=cmd_pdf_to_csv)
+
+    p = sub.add_parser("add", help="add a transaction by hand (cash, a card, a wallet...)")
+    amount = p.add_mutually_exclusive_group(required=True)
+    amount.add_argument("--spent", metavar="AMOUNT", help="money that went out, e.g. 250")
+    amount.add_argument("--received", metavar="AMOUNT", help="money that came in, e.g. 2000")
+    p.add_argument("--description", required=True)
+    p.add_argument("--account", default=manual.CASH_ACCOUNT, help="paid with / received in (default: Cash)")
+    p.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    p.add_argument("--category", help="category name (default: automatic, like imports)")
+    p.set_defaults(func=cmd_add)
+
+    p = sub.add_parser("delete-entry", help="delete a transaction you added by hand")
+    p.add_argument("id", type=int)
+    p.set_defaults(func=cmd_delete_entry)
 
     p = sub.add_parser("list", help="list transactions")
     p.add_argument("--month", help="YYYY-MM")

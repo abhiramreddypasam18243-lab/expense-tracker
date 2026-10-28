@@ -105,7 +105,7 @@ def test_ac_112_version_1_database_is_migrated(tmp_path):
     db.set_transaction_category(conn, 41, 1, "model", 0.91)
     conn.commit()
     assert conn.execute("SELECT category_confidence FROM transactions").fetchone()[0] == pytest.approx(0.91)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     db.set_setting(conn, "model_enabled", "0")
     conn.close()

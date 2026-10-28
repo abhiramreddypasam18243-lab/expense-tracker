@@ -30,7 +30,7 @@ DEFAULT_CATEGORIES = [
     ("Salary", "income", "#16A34A"),
     ("Refunds", "income", "#84CC16"),
     ("Transfers", "transfer", "#94A3B8"),
-    ("Cash", "expense", "#A16207"),
+    ("Cash", "transfer", "#A16207"),  # ATM withdrawal = bank -> cash wallet (Step 26)
     (UNCATEGORISED, "expense", "#9CA3AF"),
 ]
 

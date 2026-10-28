@@ -199,9 +199,20 @@ Most bank PDFs are locked, and each bank uses the same password every month, so 
 - **Managed in Settings**: a "Saved PDF passwords" list shows the **accounts** that have one, with a Forget button each and "Forget all". The password is never displayed, exported, logged or put in an error message.
 - **CLI**: `import-many` uses saved passwords for PDFs when `--pdf-password` isn't given; `forget-password <account>` deletes one.
 
+### I13. Transactions added by hand and the cash wallet (Step 26)
+
+Money that never appears in a bank statement — cash, a card or wallet whose statement isn't imported, a gift received — can be **added by hand** (`expenses/manual.py`).
+
+- **Fields**: date (not in the future), Spent or Received, amount (I1 parsing, entered without a sign), description (1–200 characters), category, and account ("Paid with" / "Received in", default **Cash**; any earlier account or a new name, up to 60 characters). INR only.
+- **Category**: a chosen category is stored as `category_source = manual` (so it is never overwritten and trains smart categories, 5.1); "Automatic" runs the same rules → model → Uncategorised chain as an import.
+- **Storage**: the same `transactions` table, inside one special batch (`import_batches.manual = 1`, source "Added by hand") that is **not an import**: it isn't listed in import history and can't be undone, and undoing an import never removes these entries. Each entry gets a unique fingerprint (`manual:<random>`), so two identical ₹20 teas on one day are both kept.
+- **Edit and delete**: only entries added by hand; imported rows can still only be re-categorised.
+- **Cash wallet** (owner's decision): the **Cash** category is a **transfer** — an ATM withdrawal moves money from the bank into a cash wallet and is not spending. Cash purchases logged by hand are the spending, in their real categories. Because unlogged cash would silently vanish from the totals, the Dashboard shows, for the selected month, cash **withdrawn** (imported debits in Cash) vs cash spending **logged** (entries added by hand with account Cash, outside transfer categories): "You withdrew ₹5,000 in cash in October; ₹3,500 of it isn't logged yet". Months are compared on their own (cash withdrawn in one month and spent in the next shows up as a gap in the first).
+- Transfer matching (I9) never uses the Cash category for bank-to-bank pairs.
+
 ## 5. Categorisation
 
-- **Default categories** are seeded on first run: Food & Dining, Groceries, Transport, Shopping, Bills & Utilities, Rent, Entertainment, Health, Education, Travel, Salary (income), Refunds (income), Transfers (transfer), Cash (expense), Uncategorised. Each has a fixed colour from the UI palette.
+- **Default categories** are seeded on first run: Food & Dining, Groceries, Transport, Shopping, Bills & Utilities, Rent, Entertainment, Health, Education, Travel, Salary (income), Refunds (income), Transfers (transfer), Cash (transfer since Step 26 — the cash wallet, I13), Uncategorised. Each has a fixed colour from the UI palette.
 - **Default rules** are about 40 keyword rules, including `ATM WDL`, `ATM CASH` and `CASH WDL` → Cash (not plain `ATM`, which also matches "TRE**ATM**ENT"), for example `SWIGGY` and `ZOMATO` → Food & Dining, `UBER` and `OLA` → Transport, `AMAZON` → Shopping, `SALARY` → Salary.
 - **Matching**: rules are tried in ascending `priority`, then by `id`. The first rule whose pattern is a substring of `description_norm` wins. With no match, a debit goes to **Uncategorised** (`category_source = default`).
 - **Manual override**: the user can set a transaction's category, which stores `category_source = manual`. **"Re-run rules"** recategorises only rows whose source is not `manual`.
@@ -365,6 +376,8 @@ The hosted site can't run Ollama (Streamlit Community Cloud has about 1 GB of me
 | `recurring` | Recurring payments (6.4) |
 | `undo-import <batch_id>` | Delete a batch |
 | `pdf-to-csv <in.pdf> <out.csv> [--password P]` | Convert a PDF statement to CSV (I10) |
+| `add (--spent X \| --received X) --description TEXT [--account NAME] [--date YYYY-MM-DD] [--category NAME]` | Add a transaction by hand (I13); account defaults to Cash, category to automatic |
+| `delete-entry <id>` | Delete an entry added by hand (imported rows are refused) |
 | `import-many FILE=ACCOUNT ... [--yes] [--no-transfers]` | Combined import (I9). Without `--yes` it only prints the preview (dry run, nothing written). `--no-transfers` imports without marking transfer pairs. |
 
 Exit code is 0 on success, 1 on user error (bad file or bad arguments), and 2 on an internal error.
@@ -402,6 +415,7 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
    - Filters for month, category, account and a text search.
    - An editable table where only the category column can be changed (the edit becomes a manual override).
    - A CSV export button.
+   - **Add transaction** (I13): a dialog (one form, so every field is submitted with Save) that also works with an empty ledger; an "Added by hand" card lists the entries in the current view with **Edit** (same dialog, plus Delete).
 3. **Import**:
    - A **multi-file** uploader. For each file, pick an existing account or type a new one.
    - A **combined preview** (I9): a per-file table and the transfer pairs, each with a tick box. The Import button stays disabled while any file has a blocking problem.
@@ -474,6 +488,7 @@ expense tracker/
     fx.py                   # I8 — network: exchange rates
     ai.py                   # 6.6 — network: local Ollama only
     web_ai.py               # 6.7 — network: Groq, web mode only
+    manual.py               # I13 — transactions added by hand, cash wallet
     db.py                   # schema, repository functions
     categorize.py           # section 5
     insights.py             # 6.2, 6.3
@@ -574,7 +589,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 **Extras (Step 9)**
 
 - **AC-49** Merchant display: `POS 1102 PVR CINEMAS` → `PVR Cinemas`, `UPI/R1/KFC/OKAXIS` → `KFC`, `UPI-HDFC LIFE-R2-PREMIUM` → `HDFC Life`, `POS 9 MCDONALD'S` → `Mcdonald's`. The AC-20 cases are unchanged.
-- **AC-50** A fresh database has a `Cash` expense category and the `ATM WDL`, `ATM CASH` and `CASH WDL` rules. `ATM WDL 123` → Cash, `HOSPITAL TREATMENT` → Health (not Cash). Synthetic data has no Uncategorised rows.
+- **AC-50** A fresh database has a `Cash` category (a transfer since Step 26, I13) and the `ATM WDL`, `ATM CASH` and `CASH WDL` rules. `ATM WDL 123` → Cash, `HOSPITAL TREATMENT` → Health (not Cash). Synthetic data has no Uncategorised rows.
 - **AC-51** `EXPENSES_PUBLIC=1` with a valid hash but no TLS and no `EXPENSES_TLS_PROXY=1` is refused. With Streamlit TLS on, or with `EXPENSES_TLS_PROXY=1`, it is accepted. The hash is still required (AC-41).
 - **AC-52** `docker-compose.public.yml` publishes `0.0.0.0:8501`, sets `EXPENSES_PUBLIC: "1"`, requires `${EXPENSES_PASSPHRASE_HASH:?...}`, and sets both Streamlit TLS paths. The base compose file still binds 127.0.0.1 only. `certs/` and `*.pem` are git- and docker-ignored. Streamlit serving `/_stcore/health` over HTTPS is a manual check, recorded in the learning log.
 - **AC-53** Recurring detection on a fixture finds a monthly ₹649 subscription (4 payments) and a monthly ₹22,000 rent (3 payments, different references), with the correct typical amount, count, last date, next expected date and active flag.
@@ -650,6 +665,11 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-127** Against a fake Groq server: `ask` sends the key as a Bearer token and streams only the answer text (reasoning deltas and `<think>` text never appear); 429, 401/403 and other errors raise `AIError` with a plain message that never contains the key; an unreachable server raises "not reachable".
 - **AC-128** Web mode, CA page: without a key the chat tab explains the setup and shows no input; with a key nothing is sent and no input is shown until the consent box is ticked; then a question gets the streamed answer, the request contains the CA figures and no statement merchants, and web mode never contacts Ollama even if `EXPENSES_AI_URL` is set. Manual check on the hosted site with a real key (recorded in the learning log).
 - **AC-129** After the per-visit question limit, the input is replaced by a notice and no further request is sent.
+- **AC-131** `manual.add` stores an entry in the Cash account by default, with a chosen category as `manual` or an automatic one from the rules/model; the description is trimmed and normalised; two identical entries are both kept; a zero amount, empty or too-long description, empty account, future date or unknown category is refused and nothing is stored.
+- **AC-132** Entries added by hand are not in import history and survive undoing an import; only they can be edited (date, amount, description, account, category) or deleted — an imported row is refused.
+- **AC-133** An ATM withdrawal (Cash, a transfer) is not in monthly spending; cash logged by hand is, in its own category; `cash_gap` gives withdrawn, logged and unlogged (never negative). A version-2 database gets `import_batches.manual` and Cash → transfer once (a later change back is kept). Transfer matching uses Transfers, never Cash.
+- **AC-134** Transactions page: with an empty ledger, **Add transaction** saves an entry; a bad amount shows an error and saves nothing; **Edit** changes an entry added by hand; the Dashboard shows the withdrawn and not-logged cash amounts. Manual check: in a browser, typing quickly and clicking Save stores the entry (recorded in the learning log).
+- **AC-135** `python -m expenses add` (spent/received, account, date, category) and `delete-entry` work, with exit code 1 for a negative amount, an unknown category, or an id that isn't an entry added by hand.
 - **AC-130** `ui.style.inject()` adds the light-default script: it changes only a stored "System" choice to "Light", only once per browser (marker key), reloads only when dark is showing, and never touches the network. Manual check: a browser that prefers dark opens the app light on its first visit, and a later Dark choice survives a reload (recorded in the learning log).
 - **AC-111** `ui.style.inject()` adds the hidden rerun button and the theme-sync script with the mode this run drew with; the script asks for at most one rerun per switch.
 - **AC-110** Manual check: on the deployed web app and locally, switching the ⋮ menu Dark → Light and Light → Dark gives a fully consistent page (backgrounds, cards, text, sidebar), and charts, sparklines and category colours follow by themselves within a moment, without a click (recorded in the learning log).
@@ -685,6 +705,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 23 | Spending forecast and budget early warning (backtested) | AC-118 – AC-124 |
 | 24 | Ask your CA on the web version: free hosted model (Groq), with consent and limits | AC-125 – AC-129 |
 | 25 | Light theme by default (viewer's later choice kept) | AC-130 |
+| 26 | Transactions added by hand, and the cash wallet | AC-131 – AC-135 |
 
 Rebuild the container after every step.
 
@@ -757,6 +778,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-28 | **AI chat on the web version via Groq's free tier** (owner: "I want virtual CA to work on demo too"; offered the Claude API, then chose "keep the free model"). **Amends the privacy rule for web mode only**: after the visitor ticks a consent box, the CA figures and the question go to `api.groq.com` | Streamlit Cloud (~1 GB RAM) can't run the 2.5 GB Ollama model; Groq's free tier costs nothing and needs no card, so the owner's key can't run up a bill. Only computed totals are sent, never statement rows. The desktop app stays fully local |
 | 2026-10-28 | Web model `openai/gpt-oss-20b`; consent checkbox; 20 questions per visit, 500-character questions, 6 history messages, 1,024 answer tokens | Checked 2026-10-28: Groq retired `llama-3.3-70b-versatile` and `qwen/qwen3-32b` (July–August 2026) and recommends gpt-oss; the 20B one has the highest free daily limit. The consent box was my default (the owner didn't pick one): it makes the data sharing explicit. The limits keep one visitor from using up the shared free quota |
 | 2026-10-28 | **Light theme by default** (owner: "Make light UI as default"), set once per browser through Streamlit's stored theme choice; the viewer can still pick Dark or System in the ⋮ menu | `[theme] base = "light"` was tried and has no effect when the config defines both `[theme.light]` and `[theme.dark]` (a dark-mode browser still opened dark). Streamlit has no setting for the default of the System/Light/Dark menu, so the stored choice is changed once on the first visit |
+| 2026-10-28 | **Transactions added by hand** (owner: "what about adding transactions that are not made through bank"), and **Cash is a wallet** (owner chose "Cash wallet" over keeping ATM as spending or subtracting logged cash from it): ATM withdrawals become transfers, logged cash purchases are the spending, and the Dashboard shows withdrawn-but-not-logged cash. **Changes earlier totals**: ATM withdrawals no longer count as spending (schema v3 migrates Cash to a transfer once) | Real categories for cash spending, no double counting; the not-logged notice keeps unlogged cash visible instead of silently dropping it |
+| 2026-10-28 | Entries added by hand live in one special batch (`import_batches.manual = 1`) with random fingerprints | Undo of an import can never remove them, and identical small cash purchases are real, separate purchases, not duplicates |
 | 2026-10-16 | **Theme follows the ⋮ menu instantly**: CSS `light-dark()` tokens instead of injecting one token set (owner reported "light UI not working": switching Dark → Light left the app's cards dark while Streamlit's widgets turned light) | Streamlit marks the chosen scheme with `color-scheme` on the app but doesn't rerun the script, so only CSS can react immediately |
 | 2026-10-15 | **PDF passwords remembered per account, encrypted** (owner's choice over a single password box and over plain storage); `cryptography` pinned (owner approved; already installed via pdfminer) | Banks reuse the same password monthly; encryption with a separate key file keeps a copied database from revealing them |
 | 2026-10-13 | **Headerless statements** (the owner's bank exports have no heading row): columns inferred from content, debit/credit orientation proved by the running balance, and the user can correct every column in the preview | Guessing alone could silently flip spends and income; the balance arithmetic makes it checkable, and the dropdowns make it fixable |

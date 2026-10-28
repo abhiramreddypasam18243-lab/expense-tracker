@@ -13,7 +13,10 @@ from decimal import Decimal
 from pathlib import Path
 
 DEFAULT_DB_PATH = "data/expenses.db"
-SCHEMA_VERSION = 2  # 2: category_source 'model', category_confidence, app_settings (Step 22)
+# 2: category_source 'model', category_confidence, app_settings (Step 22)
+# 3: import_batches.manual (entries added by hand); the Cash category becomes a transfer (Step 26)
+SCHEMA_VERSION = 3
+MANUAL_SOURCE = "Added by hand"  # source_name of the one batch that holds entries added by hand
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS categories (
@@ -43,7 +46,8 @@ CREATE TABLE IF NOT EXISTS import_batches (
     rows_total     INTEGER NOT NULL DEFAULT 0,
     rows_imported  INTEGER NOT NULL DEFAULT 0,
     rows_duplicate INTEGER NOT NULL DEFAULT 0,
-    rows_rejected  INTEGER NOT NULL DEFAULT 0
+    rows_rejected  INTEGER NOT NULL DEFAULT 0,
+    manual         INTEGER NOT NULL DEFAULT 0  -- 1 = the batch of entries added by hand (no undo)
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -107,6 +111,7 @@ def connect(path: str | os.PathLike | None = None, shared_across_threads: bool =
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
     _migrate_to_v2(conn)
+    _migrate_to_v3(conn)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
 
@@ -152,6 +157,20 @@ def _migrate_to_v2(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)  # recreates the indexes dropped with the old table
 
 
+def _migrate_to_v3(conn: sqlite3.Connection) -> None:
+    """Version 2 -> 3: add import_batches.manual; make the Cash category a transfer (cash wallet).
+
+    The Cash change runs only when upgrading (user_version < 3), so a later choice in Settings is kept.
+    """
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(import_batches)")}
+    upgrading = conn.execute("PRAGMA user_version").fetchone()[0] < 3
+    with conn:
+        if "manual" not in columns:
+            conn.execute("ALTER TABLE import_batches ADD COLUMN manual INTEGER NOT NULL DEFAULT 0")
+        if upgrading:
+            conn.execute("UPDATE categories SET kind = 'transfer' WHERE name = 'Cash' AND kind = 'expense'")
+
+
 # --- import batches --------------------------------------------------------------
 
 
@@ -182,7 +201,20 @@ def delete_batch(conn: sqlite3.Connection, batch_id: int) -> int:
 
 
 def list_batches(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT * FROM import_batches ORDER BY id DESC").fetchall()
+    """Imports, newest first. The batch of entries added by hand is not an import and is left out."""
+    return conn.execute("SELECT * FROM import_batches WHERE manual = 0 ORDER BY id DESC").fetchall()
+
+
+def manual_batch_id(conn: sqlite3.Connection) -> int:
+    """The one batch that holds entries added by hand, created on first use."""
+    row = conn.execute("SELECT id FROM import_batches WHERE manual = 1 ORDER BY id LIMIT 1").fetchone()
+    if row:
+        return row[0]
+    cur = conn.execute(
+        "INSERT INTO import_batches (source_name, account, imported_at, manual) VALUES (?, '', ?, 1)",
+        (MANUAL_SOURCE, _now()),
+    )
+    return cur.lastrowid
 
 
 # --- transactions --------------------------------------------------------------------
@@ -338,8 +370,10 @@ def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
 
 _TXN_WITH_CATEGORY = """
     SELECT t.*, COALESCE(c.name, 'Uncategorised') AS category_name,
-           COALESCE(c.kind, 'expense') AS category_kind, COALESCE(c.color, '#9CA3AF') AS category_color
+           COALESCE(c.kind, 'expense') AS category_kind, COALESCE(c.color, '#9CA3AF') AS category_color,
+           COALESCE(b.manual, 0) AS is_manual
     FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+         LEFT JOIN import_batches b ON b.id = t.batch_id
 """
 
 
@@ -409,6 +443,50 @@ def non_transfer_debits(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         _TXN_WITH_CATEGORY + " WHERE t.amount_minor < 0 AND COALESCE(c.kind, 'expense') != 'transfer'"
         " ORDER BY t.id"
     ).fetchall()
+
+
+def get_transaction(conn: sqlite3.Connection, txn_id: int) -> sqlite3.Row | None:
+    return conn.execute(_TXN_WITH_CATEGORY + " WHERE t.id = ?", (txn_id,)).fetchone()
+
+
+def update_manual_transaction(conn: sqlite3.Connection, txn_id: int, row: dict) -> bool:
+    """Change an entry added by hand (never an imported row). Returns False if txn_id isn't one."""
+    cur = conn.execute(
+        """UPDATE transactions SET account = :account, txn_date = :txn_date, description = :description,
+               description_norm = :description_norm, merchant = :merchant, amount_minor = :amount_minor,
+               orig_amount_minor = :amount_minor, category_id = :category_id,
+               category_source = :category_source, category_confidence = :category_confidence
+           WHERE id = :id AND batch_id IN (SELECT id FROM import_batches WHERE manual = 1)""",
+        {**row, "id": txn_id},
+    )
+    return cur.rowcount == 1
+
+
+def delete_manual_transaction(conn: sqlite3.Connection, txn_id: int) -> bool:
+    """Delete an entry added by hand (never an imported row). Returns False if txn_id isn't one."""
+    cur = conn.execute(
+        "DELETE FROM transactions"
+        " WHERE id = ? AND batch_id IN (SELECT id FROM import_batches WHERE manual = 1)",
+        (txn_id,),
+    )
+    return cur.rowcount == 1
+
+
+def cash_totals(conn: sqlite3.Connection, start: date, end: date, cash_account: str) -> tuple[int, int]:
+    """(withdrawn, logged) in paise for start <= date < end: imported debits in the Cash category,
+    and debits added by hand to the cash wallet outside transfer categories."""
+    row = conn.execute(
+        """SELECT
+             COALESCE(-SUM(CASE WHEN COALESCE(b.manual, 0) = 0 AND c.name = 'Cash'
+                                 THEN t.amount_minor END), 0),
+             COALESCE(-SUM(CASE WHEN b.manual = 1 AND t.account = :cash
+                                 AND COALESCE(c.kind, 'expense') != 'transfer' THEN t.amount_minor END), 0)
+           FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+                LEFT JOIN import_batches b ON b.id = t.batch_id
+           WHERE t.amount_minor < 0 AND t.txn_date >= :start AND t.txn_date < :end""",
+        {"cash": cash_account, "start": start.isoformat(), "end": end.isoformat()},
+    ).fetchone()
+    return row[0], row[1]
 
 
 # --- budgets ---------------------------------------------------------------------------------------

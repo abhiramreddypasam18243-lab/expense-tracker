@@ -233,9 +233,12 @@ def find_transfer_pairs(files: list[FilePreview]) -> list[TransferPair]:
 
 
 def _transfer_category(conn: sqlite3.Connection) -> int:
-    for category in categorize.list_categories(conn):
-        if category["kind"] == "transfer":
-            return category["id"]
+    """ "Transfers" if it exists, else another transfer category — never Cash (the cash wallet)."""
+    transfers = [
+        c for c in categorize.list_categories(conn) if c["kind"] == "transfer" and c["name"] != "Cash"
+    ]
+    for category in sorted(transfers, key=lambda c: c["name"] != "Transfers"):
+        return category["id"]
     return categorize.add_category(conn, "Transfers", "transfer", "#94A3B8")
 
 

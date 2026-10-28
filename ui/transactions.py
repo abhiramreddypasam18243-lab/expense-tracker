@@ -1,4 +1,4 @@
-"""Transactions: filter, search, fix categories (manual override), export."""
+"""Transactions: filter, search, fix categories (manual override), export, add entries by hand."""
 
 from datetime import date
 
@@ -7,6 +7,7 @@ import streamlit as st
 
 from expenses import categorize, db, exporter, insights
 from expenses.money import format_inr
+from ui import manual_entry
 from ui.common import card, get_conn, month_label, no_transactions_state, page_header
 
 ALL = "All"
@@ -27,6 +28,13 @@ page_header(
     "Search, filter and fix categories. Your changes are never overwritten by rules.",
     eyebrow_text="Ledger",
 )
+manual_entry.show_toast()
+add_col, _ = st.columns([1, 3])
+if add_col.button(
+    "Add transaction", type="primary", icon=":material/add:", key="manual-add", width="stretch"
+):
+    manual_entry.open_dialog()
+manual_entry.render(conn)
 
 months = insights.available_months(conn)
 if not months:
@@ -134,3 +142,23 @@ table_card.caption(
     "Tip: click a Category cell to change it — smart categories learn from your changes. "
     "Use Settings → Rules to fix many rows at once."
 )
+
+# --- entries added by hand: edit or delete (imported rows can't be changed, only re-categorised) -------
+added = [r for r in rows if r["is_manual"]]
+if added:
+    with card("manual-entries"):
+        st.markdown(f"**Added by hand** · {len(added)} in this view")
+        pick_col, edit_col = st.columns([4, 1], vertical_alignment="bottom")
+        by_id = {r["id"]: r for r in added}
+        picked = pick_col.selectbox(
+            "Entry",
+            list(by_id),
+            format_func=lambda i: (
+                f"{date.fromisoformat(by_id[i]['txn_date']):%d %b %Y} · {by_id[i]['description']} · "
+                f"{format_inr(by_id[i]['amount_minor'])} · {by_id[i]['account']}"
+            ),
+            key="manual-pick",
+        )
+        if edit_col.button("Edit", icon=":material/edit:", key="manual-edit", width="stretch"):
+            manual_entry.open_dialog(picked)
+            st.rerun()

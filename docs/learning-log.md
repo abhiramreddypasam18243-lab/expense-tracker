@@ -633,3 +633,35 @@ Two new tests (AC-130).
 
 **One thing that could go wrong**
 - The storage key is a Streamlit internal (version 1.65). If a future Streamlit renames it, the script finds no key and does nothing, so the app simply follows the system theme again. Nothing breaks.
+
+## Step 26 — Transactions added by hand, and the cash wallet (AC-131 to AC-135) — 2026-10-28
+
+**Why**: the app only knew what was in bank statements. Cash, a card whose statement isn't imported, or money received from a friend never showed up.
+
+**What was built** (`expenses/manual.py`, `ui/manual_entry.py`, Transactions page, Dashboard, CLI `add` / `delete-entry`)
+- **Add transaction** on the Transactions page (also with an empty ledger). It asks for:
+  - Spent or Received, date, amount and description;
+  - category: a chosen one, or *Automatic* (rules, then smart categories);
+  - "Paid with" (default **Cash**, any earlier account, or a new name typed in).
+- An **Added by hand** card lists those entries in the current view, with **Edit** and **Delete**. Imported rows still can't be edited, only re-categorised.
+- Entries are normal rows in the `transactions` table, so the dashboard, budgets, forecast, insights, CA and export all include them. They sit in one special batch (`import_batches.manual = 1`, schema v3): it's not in import history, can't be undone, and undoing an import never touches it.
+- Each entry gets a random fingerprint, so two identical ₹20 teas on the same day are both kept. De-duplication only makes sense for statement rows.
+
+**The cash wallet** (owner's choice)
+- Before: an ATM withdrawal of ₹5,000 counted as ₹5,000 of "Cash" spending. Logging the tea and vegetables bought with it would count the same money twice.
+- Now: **Cash is a transfer category**. The withdrawal moves money from the bank into a cash wallet, and the logged purchases are the spending, in their real categories. Existing databases are migrated once; if the owner changes Cash back to an expense in Settings, that choice is kept.
+- So that unlogged cash isn't silently lost, the Dashboard shows "You withdrew ₹5,000 in cash in October; ₹3,500 of it isn't logged yet".
+- **Effect on totals**: months with ATM withdrawals now show lower spending. Three existing tests were updated for this (the March summary drops from ₹3,650 to ₹2,650).
+
+**A bug this exposed**: transfer matching (Step 11) used "the first transfer category", which became Cash, so matched bank-to-bank transfers would have been labelled Cash. It now prefers Transfers and never uses Cash.
+
+**A UI detail**: the first version of the dialog used separate widgets. In a browser, typing quickly and then clicking Save could lose the click, because each field's change reruns the dialog. All fields are now inside one `st.form`, so they are sent together with Save. The dialog's open/closed state is kept in the session (closed by Save or by dismissing it), so a full-page rerun (for example the theme-sync rerun) doesn't close it.
+
+**Checks**
+- 17 new tests: entries, validation, the separate batch and undo, edit/delete rules, the cash wallet, migration, transfer matching, UI add/edit/error, the dashboard notice, and the CLI. All 267 tests pass.
+- Browser check (web mode, sample data):
+  - the add dialog with fast typing saves the entry;
+  - the Dashboard shows "You withdrew ₹39,751.68 in cash in June 2026; ₹39,751.68 of it isn't logged yet".
+
+**One thing that could go wrong**
+- Cash withdrawn at the end of one month and spent in the next shows a gap in the first month and "extra" logged cash in the second. The notice compares months on their own, so it is a nudge, not an exact cash balance.

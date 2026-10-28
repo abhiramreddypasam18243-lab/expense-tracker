@@ -47,12 +47,11 @@ def test_ac_27_monthly_summary(conn):
     run(conn, MARCH)
     s = insights.monthly_summary(conn, "2026-03")
     assert s.income_minor == 5_050_000
-    assert s.spend_minor == 365_000
-    assert s.net_minor == 4_685_000
+    assert s.spend_minor == 265_000  # the ATM withdrawal moves money to the cash wallet (Step 26)
+    assert s.net_minor == 4_785_000
     assert s.txn_count == 8
     assert [(c.name, c.spend_minor) for c in s.by_category] == [
         ("Shopping", 200_000),
-        ("Cash", 100_000),  # ATM WDL -> Cash since AC-50
         ("Food & Dining", 50_000),
         ("Transport", 15_000),
     ]
@@ -71,7 +70,7 @@ def test_ac_28_trend_has_twelve_months(conn):
     trend = insights.spending_trend(conn, "2026-03")
     assert len(trend) == 12
     assert trend[0] == ("2025-04", 0)
-    assert trend[-2:] == [("2026-02", 99_900), ("2026-03", 365_000)]
+    assert trend[-2:] == [("2026-02", 99_900), ("2026-03", 265_000)]
     assert insights.spending_trend(conn, "2026-01", months=3) == [
         ("2025-11", 0),
         ("2025-12", 0),
