@@ -607,3 +607,29 @@ The big miss came from a one-off ₹65,000 Amazon purchase on the 25th, which no
 
 **One thing that could go wrong**
 - Groq can retire this model too. The model is a setting (`EXPENSES_WEB_AI_MODEL`), so it can be changed in the host's secrets without a code change.
+
+## Step 25 — Light theme by default (AC-130) — 2026-10-28
+
+**Why**: the owner asked for the light UI as the default. Streamlit opens every new browser on "System", so anyone whose device is in dark mode saw the dark theme first.
+
+**What was tried first**: `[theme] base = "light"` in `.streamlit/config.toml`. In a browser emulating a dark-mode device, the app still opened dark: when both `[theme.light]` and `[theme.dark]` are defined, `base` doesn't pick the starting mode, and Streamlit has no setting for the default of its System/Light/Dark menu.
+
+**What was built**: a small script in `ui/style.py`. Streamlit keeps the viewer's choice in the browser (`localStorage`, key `stActiveTheme-/-v2`, value `"System"` at first). On a browser's first visit the script:
+1. changes `"System"` to `"Light"`;
+2. records a marker (`et-light-default-v1`) so this happens only once;
+3. reloads the page if it was showing dark, because Streamlit reads the stored theme only at start-up.
+
+If the viewer later picks Dark or System in the ⋮ menu, that choice is kept.
+
+**Checks** (headless Chrome, web mode):
+
+| Browser | Background | Page loads |
+|---|---|---|
+| Dark-mode device, first visit | light (`rgb(244, 245, 251)`) | 2 (one reload) |
+| Light-mode device, first visit | light | 1 (no reload) |
+| After choosing Dark, then reloading | dark (`rgb(10, 14, 26)`) | — |
+
+Two new tests (AC-130).
+
+**One thing that could go wrong**
+- The storage key is a Streamlit internal (version 1.65). If a future Streamlit renames it, the script finds no key and does nothing, so the app simply follows the system theme again. Nothing breaks.

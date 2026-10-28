@@ -7,6 +7,10 @@ category colours are drawn in Python with the theme the script saw, and Streamli
 the script when the viewer switches System/Light/Dark in the ⋮ menu (streamlit issue #11920).
 THEME_SYNC_JS watches the colour scheme Streamlit sets on the app; when it no longer matches the
 mode this run drew with, it clicks a hidden button once, which reruns the page in the new theme.
+
+LIGHT_DEFAULT_JS makes Light the default: Streamlit starts every new browser on "System" (dark on a
+dark-mode device), so on a browser's first visit it switches Streamlit's stored choice to "Light"
+once. Whatever the viewer picks in Settings after that is kept.
 """
 
 import streamlit as st
@@ -40,6 +44,34 @@ THEME_SYNC_JS = """
 """
 
 
+# Runs once per browser. Streamlit keeps the viewer's theme choice in localStorage under
+# "stActiveTheme-<base path>-v2" (Streamlit 1.65). Our own marker records that the default was applied.
+LIGHT_DEFAULT_JS = """
+<script>
+(() => {
+  const MARK = "et-light-default-v1";
+  let tries = 0;
+  const apply = () => {
+    try {
+      if (localStorage.getItem(MARK)) return;
+      const keys = Object.keys(localStorage).filter((k) => /^stActiveTheme-.*-v2$/.test(k));
+      if (!keys.length) { if (++tries < 20) setTimeout(apply, 250); return; }  // Streamlit hasn't saved yet
+      localStorage.setItem(MARK, "1");
+      let changed = false;
+      for (const k of keys) {
+        if (localStorage.getItem(k) === '"System"') { localStorage.setItem(k, '"Light"'); changed = true; }
+      }
+      const app = document.querySelector('[data-testid="stApp"]');
+      const dark = app && getComputedStyle(app).colorScheme.includes("dark");
+      if (changed && dark) location.reload();  // Streamlit reads the stored theme only at start-up
+    } catch (e) { /* storage blocked: keep the system theme */ }
+  };
+  apply();
+})();
+</script>
+"""
+
+
 def inject() -> None:
     st.html(theme.css())
     with st.container(key=SYNC_KEY):  # hidden by the stylesheet (takes no space); the button just reruns
@@ -48,3 +80,4 @@ def inject() -> None:
             THEME_SYNC_JS.replace("__MODE__", theme.current()).replace("__KEY__", SYNC_KEY),
             unsafe_allow_javascript=True,
         )
+        st.html(LIGHT_DEFAULT_JS, unsafe_allow_javascript=True)
