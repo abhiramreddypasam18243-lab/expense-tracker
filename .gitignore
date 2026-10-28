@@ -17,3 +17,6 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# Streamlit secrets (API keys) — never commit
+.streamlit/secrets.toml

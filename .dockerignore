@@ -19,3 +19,4 @@ htmlcov
 tests
 docs
 .vscode
+.streamlit/secrets.toml

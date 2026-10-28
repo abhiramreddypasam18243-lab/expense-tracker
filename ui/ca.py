@@ -5,7 +5,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-from expenses import ai, auth, ca, tax
+from expenses import ai, auth, ca, tax, web_ai
 from expenses.money import MoneyParseError, format_inr, parse_amount, to_plain
 from ui.common import card, esc, get_conn, nice_date, page_header
 
@@ -272,74 +272,121 @@ with tab_dates:
         for i, doc in enumerate(ca.checklist(items, year)):
             st.checkbox(doc, key=f"ca-doc-{year}-{i}")
 
-# --- ask your CA: local AI chat (spec 6.6) --------------------------------------------------------
-with tab_ai:
-    st.markdown(
-        "**Ask your CA** — a free AI model running on this PC answers your questions, "
-        "using the figures on this page. Nothing leaves your computer."
-    )
-    is_web = auth.load_config(tls_enabled=bool(st.get_option("server.sslCertFile"))).demo
-    cfg = ai.config()
-    if is_web:
+# --- ask your CA: AI chat (spec 6.6 desktop, 6.7 web) ----------------------------------------------
+
+
+def chat(answer_stream, questions_left=None):
+    """Chat history, input and streamed answers. answer_stream(history, question, context) -> chunks."""
+    history = st.session_state.setdefault("ca_chat", [])
+    for message in history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    if questions_left is not None and questions_left() <= 0:
         st.info(
-            "The AI chat runs on your own PC, so it's only in the desktop app — not on the web version. "
-            "Everything else on this page works here.",
-            icon=":material/computer:",
+            f"You've used the {web_ai.MAX_QUESTIONS} questions available per visit. "
+            "Reload the page to start a new visit.",
+            icon=":material/hourglass_bottom:",
         )
-    elif cfg.url is None:
-        st.info(
-            "To switch it on, run the app with Docker (`docker compose up -d`): it starts the local AI service "
-            "and sets `EXPENSES_AI_URL=http://ollama:11434`. Running without Docker? Install Ollama and set "
-            "`EXPENSES_AI_URL=http://localhost:11434`.",
-            icon=":material/settings:",
-        )
+        question = None
     else:
-        status = ai.status(cfg.url, cfg.model)
-        if not status.reachable:
-            st.warning(
-                "The local AI service isn't running. Start it with `docker compose up -d` and reload this page.",
-                icon=":material/power_off:",
+        question = st.chat_input(
+            "Ask about your taxes, e.g. “Which regime should I pick, and why?”",
+            max_chars=web_ai.MAX_QUESTION_CHARS if questions_left is not None else None,
+        )
+    if question:
+        context = ai.build_context(
+            inputs, result, items, ca.filing_calendar(year, today), ca.checklist(items, year)
+        )
+        with st.chat_message("user"):
+            st.markdown(question)
+        with st.chat_message("assistant"):
+            try:
+                answer = st.write_stream(answer_stream(history, question, context))
+            except ai.AIError as exc:
+                answer = None
+                st.error(f"The AI couldn't answer: {exc}", icon=":material/error:")
+        if answer:
+            history += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
+        if questions_left is not None and questions_left() <= 0:
+            st.rerun()  # that was the last one: replace the input with the limit notice
+    if history and st.button("Clear chat", key="ai_clear", icon=":material/delete_sweep:"):
+        st.session_state["ca_chat"] = []
+        st.rerun()
+
+
+with tab_ai:
+    is_web = auth.load_config(tls_enabled=bool(st.get_option("server.sslCertFile"))).demo
+    if is_web:
+        web = web_ai.config()
+        st.markdown(
+            f"**Ask your CA** — a free AI model hosted by {web_ai.PROVIDER} answers your questions, "
+            "using the figures on this page."
+        )
+        if web.key is None:
+            st.info(
+                "The AI chat isn't switched on for this site yet: the site owner needs to add a free "
+                "`GROQ_API_KEY` in the host's secrets. Everything else on this page works.",
+                icon=":material/key_off:",
             )
-        elif not status.has_model:
-            st.markdown(
-                f"One-time setup: download the free model **{cfg.model}** (about 2.5 GB). It is stored on this PC "
-                "and works offline afterwards."
-            )
-            if st.button("Download model", key="ai_pull", type="primary", icon=":material/download:"):
-                bar = st.progress(0, text="Starting download…")
-                try:
-                    for step in ai.pull(cfg.url, cfg.model):
-                        if step.fraction is not None:
-                            bar.progress(
-                                int(step.fraction * 100), text=f"Downloading… {int(step.fraction * 100)}%"
-                            )
-                    st.rerun()
-                except ai.AIError as exc:
-                    st.error(f"Download failed: {exc}", icon=":material/error:")
         else:
-            st.caption(f"Model: {cfg.model} · answers can take a little while on a laptop CPU.")
-            history = st.session_state.setdefault("ca_chat", [])
-            for message in history:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-            question = st.chat_input("Ask about your taxes, e.g. “Which regime should I pick, and why?”")
-            if question:
-                context = ai.build_context(
-                    inputs, result, items, ca.filing_calendar(year, today), ca.checklist(items, year)
+            st.caption(
+                f"What is sent to {web_ai.PROVIDER}: your question, this chat, and the summary figures on this page "
+                "(income, tax under each regime, deductions, totals of tax-relevant items, deadlines). "
+                "Never your statement rows, descriptions, merchants or account details. Nothing is stored by this "
+                "app. The desktop app answers on your own PC instead."
+            )
+            agreed = st.checkbox(
+                f"Send my CA figures to {web_ai.PROVIDER} to answer my questions", key="ai_web_consent"
+            )
+            if agreed:
+                st.caption(
+                    f"Model: {web.model} via {web_ai.PROVIDER} (free tier) · "
+                    f"up to {web_ai.MAX_QUESTIONS} questions per visit."
                 )
-                with st.chat_message("user"):
-                    st.markdown(question)
-                with st.chat_message("assistant"):
+
+                def web_answer(history, question, context):
+                    st.session_state["ai_web_asked"] = st.session_state.get("ai_web_asked", 0) + 1
+                    return web_ai.ask(web.key, web.model, history, question, context)
+
+                chat(web_answer, lambda: web_ai.MAX_QUESTIONS - st.session_state.get("ai_web_asked", 0))
+    else:
+        st.markdown(
+            "**Ask your CA** — a free AI model running on this PC answers your questions, "
+            "using the figures on this page. Nothing leaves your computer."
+        )
+        cfg = ai.config()
+        if cfg.url is None:
+            st.info(
+                "To switch it on, run the app with Docker (`docker compose up -d`): it starts the local AI service "
+                "and sets `EXPENSES_AI_URL=http://ollama:11434`. Running without Docker? Install Ollama and set "
+                "`EXPENSES_AI_URL=http://localhost:11434`.",
+                icon=":material/settings:",
+            )
+        else:
+            status = ai.status(cfg.url, cfg.model)
+            if not status.reachable:
+                st.warning(
+                    "The local AI service isn't running. Start it with `docker compose up -d` and reload this page.",
+                    icon=":material/power_off:",
+                )
+            elif not status.has_model:
+                st.markdown(
+                    f"One-time setup: download the free model **{cfg.model}** (about 2.5 GB). It is stored on this "
+                    "PC and works offline afterwards."
+                )
+                if st.button("Download model", key="ai_pull", type="primary", icon=":material/download:"):
+                    bar = st.progress(0, text="Starting download…")
                     try:
-                        answer = st.write_stream(ai.ask(cfg.url, cfg.model, history, question, context))
+                        for step in ai.pull(cfg.url, cfg.model):
+                            if step.fraction is not None:
+                                bar.progress(
+                                    int(step.fraction * 100), text=f"Downloading… {int(step.fraction * 100)}%"
+                                )
+                        st.rerun()
                     except ai.AIError as exc:
-                        answer = None
-                        st.error(f"The AI couldn't answer: {exc}", icon=":material/error:")
-                if answer:
-                    history += [
-                        {"role": "user", "content": question},
-                        {"role": "assistant", "content": answer},
-                    ]
-            if history and st.button("Clear chat", key="ai_clear", icon=":material/delete_sweep:"):
-                st.session_state["ca_chat"] = []
-                st.rerun()
+                        st.error(f"Download failed: {exc}", icon=":material/error:")
+            else:
+                st.caption(f"Model: {cfg.model} · answers can take a little while on a laptop CPU.")
+                chat(
+                    lambda history, question, context: ai.ask(cfg.url, cfg.model, history, question, context)
+                )

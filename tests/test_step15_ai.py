@@ -233,9 +233,10 @@ def test_ac_81_no_url_shows_setup(monkeypatch, tmp_path):
     assert len(at.chat_input) == 0
 
 
-def test_ac_81_web_mode_is_desktop_only(monkeypatch, tmp_path, fake):
+def test_ac_81_web_mode_never_uses_ollama(monkeypatch, tmp_path, fake):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)  # amended in Step 24: the web uses Groq instead (6.7)
     at = ca_page(monkeypatch, tmp_path, ai_url=fake.url, web=True)
-    assert re.search(r"desktop", page_text(at), re.I) and len(at.chat_input) == 0
+    assert len(at.chat_input) == 0 and not fake.requests
 
 
 def test_ac_81_download_then_chat(monkeypatch, tmp_path):

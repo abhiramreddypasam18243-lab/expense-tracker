@@ -582,3 +582,28 @@ The big miss came from a one-off ₹65,000 Amazon purchase on the 25th, which no
 
 **One thing that could go wrong**
 - One-off large purchases and irregular income months make any forecast miss; with only a few months of history the method choice rests on little evidence.
+
+## Step 24 — Ask your CA on the web version (AC-125 to AC-129) — 2026-10-28
+
+**Why**: the AI chat only worked on the desktop, because the free Ollama model (2.5 GB) can't run on Streamlit Community Cloud (about 1 GB of memory). The owner wanted it on the hosted site too, with a free model.
+
+**What was built** (`expenses/web_ai.py`, chat tab of the Your CA page)
+- In web mode the chat is answered by **Groq's free tier**, model `openai/gpt-oss-20b`, through Groq's OpenAI-compatible API (streamed server-sent events, read with `urllib`, so no new dependency).
+- The system prompt and "CA figures" block are the same as on the desktop, so the model still only quotes numbers the tax calculator computed.
+- **Consent first**: nothing is sent until the visitor ticks "Send my CA figures to Groq…". A caption says exactly what is sent and what never is (statement rows, descriptions, merchants, account details).
+- **Limits**: 20 questions per visit, questions up to 500 characters, the last 6 messages as history, answers up to 1,024 tokens.
+- **Key**: `GROQ_API_KEY` as a Streamlit Cloud secret; never in the repo (`.streamlit/secrets.toml` is git- and docker-ignored), never logged or shown. Errors (rate limit, refused key, no connection) are plain sentences without the key.
+- The chat UI is now one function shared by the desktop (Ollama) and web (Groq) versions.
+
+**Checks**
+- 12 new tests against a fake Groq server (streamed answer only, reasoning hidden, errors, payload limits, consent, question limit). AC-43's network allowlist and the old "web mode has no chat" test were amended. All 248 tests pass.
+- In a browser (web mode, fake Groq): the consent box unlocks the input, and the answer streams into the chat.
+- Live check with a real key on the hosted site: *pending; the owner adds the key*.
+
+**Why it is designed this way**
+- *Groq instead of the Claude API*: the owner chose a free model. With no card on the account, nobody can run up a bill with the owner's key; the worst case is "limit reached, try again later".
+- *gpt-oss-20b*: Groq retired Llama 3.3 70B and Qwen3-32B in July–August 2026 and points to gpt-oss; the 20B model has the highest free daily limit (about 14,400 requests/day vs 1,000 for the 120B).
+- *Consent box*: the desktop chat never leaves the PC; on the web the figures go to a third party, so the visitor should choose that knowingly.
+
+**One thing that could go wrong**
+- Groq can retire this model too. The model is a setting (`EXPENSES_WEB_AI_MODEL`), so it can be changed in the host's secrets without a code change.

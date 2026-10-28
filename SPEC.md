@@ -317,13 +317,23 @@ Each item lists its transactions and total; totals **pre-fill** the deduction fi
 
 ### 6.6 Ask your CA — local AI chat (Step 15)
 
-A chat tab on the "Your CA" page, answered by a **free model running on this PC** through **Ollama**. Desktop only; in web mode the tab explains that it isn't available.
+A chat tab on the "Your CA" page, answered by a **free model running on this PC** through **Ollama**. On the desktop; the web version uses a hosted free model instead (6.7, amended in Step 24).
 
 - **Where it runs**: an `ollama` service in `docker-compose.yml` (image pinned), reachable **only on the internal compose network** (no published port). Models are stored in a named volume. The app finds it through `EXPENSES_AI_URL` (compose sets `http://ollama:11434`); if the variable is unset the tab shows setup instructions.
 - **Local only** (`expenses/ai.py`): the URL must point to `localhost`, a loopback address or the compose service name `ollama`; anything else is refused. Chat content is never logged.
 - **Model**: `EXPENSES_AI_MODEL`, default **`qwen3:4b-instruct`** (2.5 GB, text-only, no "thinking" step, runs on CPU). If it isn't downloaded yet, the tab offers a one-time **Download model** button with a progress bar (Ollama's `/api/pull`).
 - **Grounded answers**: every question is sent with a **context** built from the CA's own results — tax year and section names, both regimes' taxable income and tax, the recommended regime and saving, the deduction figures used, detected tax-relevant items with totals, upcoming deadlines and the checklist. The system prompt tells the model to use **only these figures** for numbers, to say what it needs when information is missing, to answer for India's tax rules, and to remind that it is not professional advice. Calculations are never left to the model.
 - Answers stream in as they are generated. The model's "thinking" never reaches the user: the app asks Ollama for the model's capabilities (`/api/show`); for a thinking model it requests `"think": true` so Ollama returns the thinking in a separate field that the app ignores; for other models it doesn't send the setting. As a safety net, `<think>…</think>` text and stray tags are removed. The chat history lives in the session only.
+
+### 6.7 Ask your CA on the web version — free hosted model (Step 24)
+
+The hosted site can't run Ollama (Streamlit Community Cloud has about 1 GB of memory), so in **web mode** the same chat is answered by a **free hosted model through Groq** (`expenses/web_ai.py`). The desktop app is unchanged and never uses Groq.
+
+- **Provider and model**: Groq's OpenAI-compatible chat API, `https://api.groq.com/openai/v1/chat/completions`, the only URL in the module. Model `EXPENSES_WEB_AI_MODEL`, default **`openai/gpt-oss-20b`** (free tier with the highest daily request limit; Groq retired its Llama 3.x and Qwen3-32B models in July–August 2026). For gpt-oss models the request asks for `reasoning_effort: "low"`; the reasoning comes back in a separate field that is ignored, and `<think>` text is stripped as in 6.6.
+- **Key**: `GROQ_API_KEY`, set by the site owner as a Streamlit Cloud secret (Streamlit exposes it as an environment variable). Never in the repo or the image, never logged, never shown. Without a key the tab says the chat isn't switched on yet.
+- **Consent**: nothing is sent until the visitor ticks "Send my CA figures to Groq to answer my questions". A caption lists exactly what is sent: the question, the recent chat, and the same CA-figures block as 6.6 (computed totals, regimes, deductions, tax-item totals, deadlines). Never statement rows, descriptions, merchants or account details.
+- **Limits** (to share the free quota fairly): 20 questions per visit (then the input is replaced by a notice), questions cut to 500 characters, the last 6 chat messages sent as history, answers capped at 1,024 tokens.
+- **Errors** are shown in plain words: rate limit (HTTP 429) → "the free AI limit was reached for now"; a refused key (401/403) → "the site owner needs to update it"; no connection → "not reachable". Error text never contains the key.
 
 ### 6.4 Spending forecast and budget early warning (Step 23)
 
@@ -404,7 +414,7 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 - Every visitor gets a **private, in-memory SQLite database** that lives only in their browser session. Nothing is written to disk, and it disappears when the visitor leaves.
 - A new session starts with **sample data** (from `tools/make_synthetic.py`) and a banner "You're viewing **sample data**" with a **Use my own statements** button that empties the session's database.
 - After that, a banner reads "**Private session** — your statements are processed in memory for this visit only. Nothing is saved." The Import page works as on the desktop (combined upload, I9) and shows the same notice.
-- The AI chat (Step 15) is off in web mode; the offline CA (Step 14) works.
+- The AI chat uses Groq's free tier after the visitor agrees (6.7, Step 24; it used to be off in web mode). The offline CA (Step 14) works as on the desktop.
 
 ## 8. Deployment
 
@@ -442,7 +452,7 @@ The UI is a thin layer over the core: no SQL and no business rules live in UI fi
 
 ## 9. Privacy and security
 
-- No network calls at runtime **except the exchange-rate lookup in I8** (decision Q5). A test checks that no module other than `expenses/fx.py` imports `requests`, `urllib.request`, `http.client` or `socket`, and that `fx.py` only contacts `api.frankfurter.dev`.
+- No network calls at runtime **except the exchange-rate lookup in I8** (decision Q5), the local Ollama service (6.6) and, in web mode only and after the visitor agrees, Groq (6.7). A test checks that no module other than `expenses/fx.py` imports `requests`, `urllib.request`, `http.client` or `socket`, and that `fx.py` only contacts `api.frankfurter.dev`.
 - The container therefore needs outbound HTTPS. Without it, foreign-currency rows are rejected while INR rows import normally.
 - Logging: at INFO level and above, log only counts, IDs and timings, never descriptions, merchants or amounts. DEBUG is off by default.
 - Uploaded files are processed in memory and never written to disk. Only the parsed rows go to SQLite.
@@ -461,7 +471,9 @@ expense tracker/
     dates.py                # I2
     importer.py             # I3, I4, I6, I7
     fingerprint.py          # I5
-    fx.py                   # I8 — the only module allowed to use the network
+    fx.py                   # I8 — network: exchange rates
+    ai.py                   # 6.6 — network: local Ollama only
+    web_ai.py               # 6.7 — network: Groq, web mode only
     db.py                   # schema, repository functions
     categorize.py           # section 5
     insights.py             # 6.2, 6.3
@@ -633,6 +645,11 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 - **AC-122** CLI `forecast --month --as-of` prints projections, warnings and the chosen method (exit 0); a bad date exits 1.
 - **AC-123** The Forecast page renders for the current month, a replay month and an empty database (AppTest, light and dark); the Dashboard shows the budget warning only for the current month.
 - **AC-124** Manual check: in the browser, a replay month shows projected vs actual, the chart and the backtest table; a budget at risk appears on the Forecast page (recorded in the learning log).
+- **AC-125** `web_ai.config()` reads `GROQ_API_KEY` (trimmed; unset → no key) and `EXPENSES_WEB_AI_MODEL` (default `openai/gpt-oss-20b`); the module's only host is `api.groq.com` and it neither logs nor prints. AC-43 amended: the network modules are exactly `ai.py`, `fx.py` and `web_ai.py`.
+- **AC-126** The request carries the system prompt with the CA figures, only the last 6 history messages, the question cut to 500 characters, `stream: true`, `max_completion_tokens` 1,024, and `reasoning_effort: "low"` only for gpt-oss models.
+- **AC-127** Against a fake Groq server: `ask` sends the key as a Bearer token and streams only the answer text (reasoning deltas and `<think>` text never appear); 429, 401/403 and other errors raise `AIError` with a plain message that never contains the key; an unreachable server raises "not reachable".
+- **AC-128** Web mode, CA page: without a key the chat tab explains the setup and shows no input; with a key nothing is sent and no input is shown until the consent box is ticked; then a question gets the streamed answer, the request contains the CA figures and no statement merchants, and web mode never contacts Ollama even if `EXPENSES_AI_URL` is set. Manual check on the hosted site with a real key (recorded in the learning log).
+- **AC-129** After the per-visit question limit, the input is replaced by a notice and no further request is sent.
 - **AC-111** `ui.style.inject()` adds the hidden rerun button and the theme-sync script with the mode this run drew with; the script asks for at most one rerun per switch.
 - **AC-110** Manual check: on the deployed web app and locally, switching the ⋮ menu Dark → Light and Light → Dark gives a fully consistent page (backgrounds, cards, text, sidebar), and charts, sparklines and category colours follow by themselves within a moment, without a click (recorded in the learning log).
 - **AC-104** Manual check: in the browser, a headerless statement shows "Columns guessed", the role dropdowns change the result, and the import works (recorded in the learning log).
@@ -665,6 +682,7 @@ The test for each criterion is named `test_ac_XX_<slug>`.
 | 21 | Theme switching without a rerun (light-dark tokens) | AC-109 – AC-111 |
 | 22 | Learned categorisation from the user's corrections (scikit-learn) | AC-112 – AC-117 |
 | 23 | Spending forecast and budget early warning (backtested) | AC-118 – AC-124 |
+| 24 | Ask your CA on the web version: free hosted model (Groq), with consent and limits | AC-125 – AC-129 |
 
 Rebuild the container after every step.
 
@@ -734,6 +752,8 @@ These must be answered by the owner before the step that needs them. Each one ha
 | 2026-10-17 | **Spending forecast** (owner chose option #2): four month-end projection methods, chosen per user by backtesting (WAPE) on their own past months; replay mode for past months | A single fixed method would be wrong for some spending patterns (bills early in the month break simple pace); backtesting on the user's data picks what works for them and makes the accuracy visible |
 | 2026-10-17 | **Learned categorisation** (owner chose option #1 of the improvement plan and approved `scikit-learn`): rules first, then a TF-IDF + Complement-Naive-Bayes model with a confidence threshold; evaluated on merchants never seen in training | Turns the user's corrections into training data; the merchant-grouped split measures real generalisation instead of memorised merchant names |
 | 2026-10-17 | Classifier = Complement Naive Bayes; AC-113 measures accuracy separately for known vs new vocabulary | Over 10 benchmarks the three classifiers were within a few points (≈ 67–71 %); every remaining error was a category word never seen in training or a deliberately ambiguous name, so a single overall number would mostly measure the benchmark's vocabulary, not the model |
+| 2026-10-28 | **AI chat on the web version via Groq's free tier** (owner: "I want virtual CA to work on demo too"; offered the Claude API, then chose "keep the free model"). **Amends the privacy rule for web mode only**: after the visitor ticks a consent box, the CA figures and the question go to `api.groq.com` | Streamlit Cloud (~1 GB RAM) can't run the 2.5 GB Ollama model; Groq's free tier costs nothing and needs no card, so the owner's key can't run up a bill. Only computed totals are sent, never statement rows. The desktop app stays fully local |
+| 2026-10-28 | Web model `openai/gpt-oss-20b`; consent checkbox; 20 questions per visit, 500-character questions, 6 history messages, 1,024 answer tokens | Checked 2026-10-28: Groq retired `llama-3.3-70b-versatile` and `qwen/qwen3-32b` (July–August 2026) and recommends gpt-oss; the 20B one has the highest free daily limit. The consent box was my default (the owner didn't pick one): it makes the data sharing explicit. The limits keep one visitor from using up the shared free quota |
 | 2026-10-16 | **Theme follows the ⋮ menu instantly**: CSS `light-dark()` tokens instead of injecting one token set (owner reported "light UI not working": switching Dark → Light left the app's cards dark while Streamlit's widgets turned light) | Streamlit marks the chosen scheme with `color-scheme` on the app but doesn't rerun the script, so only CSS can react immediately |
 | 2026-10-15 | **PDF passwords remembered per account, encrypted** (owner's choice over a single password box and over plain storage); `cryptography` pinned (owner approved; already installed via pdfminer) | Banks reuse the same password monthly; encryption with a separate key file keeps a copied database from revealing them |
 | 2026-10-13 | **Headerless statements** (the owner's bank exports have no heading row): columns inferred from content, debit/credit orientation proved by the running balance, and the user can correct every column in the preview | Guessing alone could silently flip spends and income; the balance arithmetic makes it checkable, and the dropdowns make it fixable |
@@ -772,7 +792,7 @@ I am an undergraduate student building this as a graded project. I will be quizz
 ## Project rules
 
 - Money: parse with Decimal, store as signed integers in minor units, never use float. Format only for display.
-- Privacy: no network calls at runtime, no telemetry, no downloading models. Logs at normal levels must not contain descriptions, merchants or amounts. *(Amended 2026-10-12, decision Q5: one exception, the exchange-rate lookup in rule I8. Amended 2026-10-13, Step 15: a local Ollama model may be downloaded once; the app talks to it only inside Docker.)*
+- Privacy: no network calls at runtime, no telemetry, no downloading models. Logs at normal levels must not contain descriptions, merchants or amounts. *(Amended 2026-10-12, decision Q5: one exception, the exchange-rate lookup in rule I8. Amended 2026-10-13, Step 15: a local Ollama model may be downloaded once; the app talks to it only inside Docker. Amended 2026-10-28, Step 24: in web mode only, after the visitor agrees, the CA chat may send the CA figures and the question to Groq.)*
 - Data: never create, commit or print real bank data. Use only the synthetic generator in tools/make_synthetic.py. The database and data/ are git-ignored.
 - Structure: core logic in plain Python modules with no UI imports. The CLI and the Streamlit UI are thin layers over the core.
 - Dependencies: pin versions in requirements.txt. Ask before adding a new dependency.
